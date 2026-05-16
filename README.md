@@ -88,11 +88,85 @@ The original research brief is kept in
 
 ## Current Status
 
-This is an early research and prototype scaffold. The first implemented slice is
-a dependency-free in-memory session registry plus load-aware router.
+This is an early research and prototype scaffold.
 
-Run tests with:
+The implemented slice today is a dependency-free gateway policy prototype:
+
+- in-memory session registry
+- load-aware router
+- self-explaining local dashboard for routing behavior
+- automated tests for stickiness, overload protection, unhealthy-instance
+  reassignment, and dashboard startup
+
+The reusable library core and real transport adapters are still the next
+recommended build steps.
+
+## Recommended Path
+
+Build the reusable library core first, then build the self-hosted gateway on
+top of that core.
+
+That keeps the architecture clean:
+
+- Option 1 library: reusable transport-neutral building blocks
+- Option 2 gateway: self-hosted runtime that packages those building blocks for
+  multi-instance deployments
+
+The current repo direction still prefers the self-hosted/local gateway outcome,
+but it should be built on top of a shared core rather than invented as a
+one-off runtime.
+
+## Install
+
+Use Node.js 20 or newer.
 
 ```sh
-node --test
+npm install
 ```
+
+## Run Tests
+
+```sh
+npm test
+```
+
+## Launch The Local UI
+
+```sh
+npm run demo
+```
+
+Then open `http://127.0.0.1:4321`.
+
+## What The UI Demonstrates
+
+The local dashboard explains, in plain English:
+
+- the MCP scaling problem this repo is solving
+- what session affinity means
+- what load-aware routing means
+- what Option 1 library means
+- what Option 2 gateway means
+- what is implemented now
+- what is still planned
+
+It also lets you interactively:
+
+- view multiple fake MCP server instances
+- change their health and load
+- create new sessions
+- route existing sessions back to the same server
+- see overloaded instances skipped for new sessions
+- mark a server unhealthy and watch reassignment happen
+- inspect routing decisions step by step
+
+## Checks
+
+```sh
+npm run check
+```
+
+## Plan Document
+
+The evaluation and execution plan for scaling this prototype lives in
+[`docs/agentic-scale-up-plan.md`](docs/agentic-scale-up-plan.md).

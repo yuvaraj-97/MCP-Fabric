@@ -1,0 +1,278 @@
+import { LoadRouter } from "../load-balancer/load-router.js";
+import { MemorySessionRegistry } from "../session-registry/memory-session-registry.js";
+
+const DEFAULT_LOAD_THRESHOLD = 0.7;
+const DEFAULT_INSTANCES = [
+  { serverInstanceId: "server-a", healthy: true, load: 0.22, acceptingNewSessions: true },
+  { serverInstanceId: "server-b", healthy: true, load: 0.48, acceptingNewSessions: true },
+  { serverInstanceId: "server-c", healthy: true, load: 0.82, acceptingNewSessions: true },
+];
+
+const DASHBOARD_COPY = {
+  title: "MCP Scaling Demo Dashboard",
+  problem:
+    "This repo explores how to keep MCP protocol semantics intact while adding deployment infrastructure for multi-instance routing, session stickiness, and load-aware decisions.",
+  concepts: [
+    {
+      title: "Session affinity",
+      body:
+        "Session affinity means once a client session is assigned to a server instance, later requests for that same session go back to the same instance while it stays healthy.",
+    },
+    {
+      title: "Load-aware routing",
+      body:
+        "Load-aware routing means new sessions prefer the healthiest, least-loaded instance instead of blindly spreading traffic.",
+    },
+    {
+      title: "Option 1 library",
+      body:
+        "Option 1 packages the routing, session registry, and transport-neutral primitives as reusable library code that other MCP deployments can embed.",
+    },
+    {
+      title: "Option 2 gateway",
+      body:
+        "Option 2 runs a standalone self-hosted gateway in front of multiple MCP server instances so teams can centralize routing without changing server business logic.",
+    },
+  ],
+  status: {
+    implemented:
+      "Today the repo has an in-memory session registry, a load-aware router, and this local dashboard that explains each routing decision step by step.",
+    planned:
+      "Next comes durable session state, transport adapters, and a self-hosted gateway layer that can sit in front of real MCP servers.",
+  },
+  improvements: [
+    {
+      title: "What improved",
+      body:
+        "Milestone 1 adds an interactive local dashboard so non-technical reviewers can watch session routing happen instead of reading code only.",
+    },
+    {
+      title: "Why it matters",
+      body:
+        "It makes the scaling story visible: sticky sessions, overload protection, and unhealthy-instance reassignment can now be demonstrated live.",
+    },
+  ],
+  codeAdded: [
+    "packages/gateway/load-balancer/load-router.js now exposes routing traces for explanation.",
+    "packages/gateway/demo/local-demo-controller.js simulates fake MCP instances, sessions, and decision logs.",
+    "apps/local-dashboard/server.js serves the local dashboard and JSON API.",
+    "apps/local-dashboard/public/* renders the self-explaining UI and interactive controls.",
+  ],
+  testProof: [
+    "Session registry unit tests verify assign, update, delete, deleteByServer, and list copy behavior.",
+    "Router tests verify least-loaded selection, sticky existing sessions, overload blocking, unhealthy reassignment, and trace output.",
+    "Dashboard smoke tests verify the local UI and API start correctly and expose live state.",
+  ],
+  walkthrough: [
+    "Create a new session and watch the least-loaded healthy instance win.",
+    "Raise one instance above the threshold, then create another session and confirm it is skipped.",
+    "Route an existing session again and confirm it stays sticky to the same server.",
+    "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
+  ],
+};
+
+export class LocalDemoController {
+  #loadThreshold;
+  #registry;
+  #router;
+  #events = [];
+  #nextSessionNumber = 1;
+
+  constructor({ loadThreshold = DEFAULT_LOAD_THRESHOLD, initialInstances = DEFAULT_INSTANCES } = {}) {
+    if (typeof loadThreshold !== "number" || loadThreshold < 0 || loadThreshold > 1) {
+      throw new RangeError("loadThreshold must be a number between 0 and 1");
+    }
+
+    this.#loadThreshold = loadThreshold;
+    this.reset(initialInstances);
+  }
+
+  reset(initialInstances = DEFAULT_INSTANCES) {
+    this.#registry = new MemorySessionRegistry();
+    this.#router = new LoadRouter({
+      sessionRegistry: this.#registry,
+      loadThreshold: this.#loadThreshold,
+    });
+    this.#events = [];
+    this.#nextSessionNumber = 1;
+
+    for (const instance of initialInstances) {
+      this.#router.upsertInstance(instance);
+    }
+
+    this.#recordEvent({
+      kind: "system",
+      title: "Dashboard reset",
+      summary: "Seeded fake MCP server instances for a fresh local demo.",
+      steps: [
+        `Loaded ${initialInstances.length} fake server instances.`,
+        `New session threshold is ${this.#loadThreshold}.`,
+      ],
+    });
+
+    return this.getState();
+  }
+
+  getState() {
+    const instances = sortInstances(this.#router.listInstances());
+    const sessions = sortSessions(this.#registry.list());
+
+    return {
+      dashboard: DASHBOARD_COPY,
+      loadThreshold: this.#loadThreshold,
+      instances,
+      sessions,
+      events: this.#events.map((event) => ({
+        ...event,
+        steps: [...event.steps],
+      })),
+      summary: {
+        totalInstances: instances.length,
+        healthyInstances: instances.filter((instance) => instance.healthy).length,
+        overloadedInstances: instances.filter((instance) => instance.load >= this.#loadThreshold).length,
+        activeSessions: sessions.length,
+      },
+    };
+  }
+
+  createSession(sessionId) {
+    const normalizedSessionId = normalizeOptionalSessionId(sessionId) ?? `session-${this.#nextSessionNumber++}`;
+    return this.#routeSession(normalizedSessionId, { mode: "create" });
+  }
+
+  routeSession(sessionId) {
+    const normalizedSessionId = normalizeRequiredSessionId(sessionId);
+    return this.#routeSession(normalizedSessionId, { mode: "route" });
+  }
+
+  updateInstance(serverInstanceId, updates) {
+    const normalizedServerInstanceId = normalizeRequiredServerInstanceId(serverInstanceId);
+    const current = this.#router.listInstances().find(
+      (instance) => instance.serverInstanceId === normalizedServerInstanceId,
+    );
+
+    if (!current) {
+      throw new Error(`Unknown server instance: ${normalizedServerInstanceId}`);
+    }
+
+    const next = this.#router.upsertInstance({
+      ...current,
+      ...updates,
+    });
+
+    this.#recordEvent({
+      kind: "instance-update",
+      title: `Updated ${normalizedServerInstanceId}`,
+      summary: "Changed fake server health or load for the local demo.",
+      steps: [
+        `healthy = ${next.healthy}`,
+        `acceptingNewSessions = ${next.acceptingNewSessions}`,
+        `load = ${next.load}`,
+      ],
+    });
+
+    return {
+      instance: next,
+      state: this.getState(),
+    };
+  }
+
+  #routeSession(sessionId, { mode }) {
+    try {
+      const decision = this.#router.explainRoute(sessionId);
+      const title = mode === "create" ? `Created ${sessionId}` : `Routed ${sessionId}`;
+      const summary = decision.reusedExistingSession
+        ? `${sessionId} stayed on ${decision.serverInstanceId} because the assigned instance is still healthy.`
+        : `${sessionId} was assigned to ${decision.serverInstanceId} using the new-session policy.`;
+
+      this.#recordEvent({
+        kind: "routing",
+        title,
+        summary,
+        steps: decision.trace.map((entry) => describeTraceEntry(entry, this.#loadThreshold)),
+      });
+
+      return {
+        decision,
+        state: this.getState(),
+      };
+    } catch (error) {
+      this.#recordEvent({
+        kind: "routing-error",
+        title: `Routing failed for ${sessionId}`,
+        summary: error.message,
+        steps: Array.isArray(error.trace)
+          ? error.trace.map((entry) => describeTraceEntry(entry, this.#loadThreshold))
+          : ["No trace details were available."],
+      });
+      throw error;
+    }
+  }
+
+  #recordEvent(event) {
+    const entry = {
+      id: `event-${this.#events.length + 1}`,
+      timestamp: new Date().toISOString(),
+      ...event,
+    };
+
+    this.#events = [entry, ...this.#events].slice(0, 20);
+  }
+}
+
+function describeTraceEntry(entry, loadThreshold) {
+  switch (entry.type) {
+    case "lookup":
+      return entry.existingServerInstanceId
+        ? `Checked session registry: ${entry.sessionId} already points to ${entry.existingServerInstanceId}.`
+        : `Checked session registry: ${entry.sessionId} does not have an assigned server yet.`;
+    case "reuse-existing-session":
+      return `Reused existing assignment on ${entry.serverInstanceId} because it is still healthy.`;
+    case "existing-session-reassignment-required":
+      return `Existing assignment could not be reused because ${entry.previousServerInstanceId} was ${entry.reason.replaceAll("-", " ")}.`;
+    case "instance-evaluated":
+      return entry.eligible
+        ? `Evaluated ${entry.serverInstanceId}: healthy=${entry.healthy}, accepting=${entry.acceptingNewSessions}, load=${entry.load}. Eligible for new sessions.`
+        : `Evaluated ${entry.serverInstanceId}: skipped because ${entry.reasons.join("; ")}.`;
+    case "instance-selected":
+      return `Selected ${entry.serverInstanceId} as the least-loaded healthy instance below threshold ${loadThreshold}.`;
+    case "session-assigned":
+      return `Stored session affinity: ${entry.sessionId} -> ${entry.serverInstanceId}.`;
+    case "no-instance-selected":
+      return "No healthy server instance was available for a new session.";
+    default:
+      return `Observed routing step: ${entry.type}.`;
+  }
+}
+
+function sortInstances(instances) {
+  return [...instances].sort((left, right) => left.serverInstanceId.localeCompare(right.serverInstanceId));
+}
+
+function sortSessions(sessions) {
+  return [...sessions].sort((left, right) => left.sessionId.localeCompare(right.sessionId));
+}
+
+function normalizeOptionalSessionId(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  return normalizeRequiredSessionId(value);
+}
+
+function normalizeRequiredSessionId(value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError("sessionId must be a non-empty string");
+  }
+
+  return value.trim();
+}
+
+function normalizeRequiredServerInstanceId(value) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError("serverInstanceId must be a non-empty string");
+  }
+
+  return value.trim();
+}

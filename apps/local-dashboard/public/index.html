@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCP Scaling Demo Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">Milestone 1</p>
+        <h1>Self-explaining MCP scaling dashboard</h1>
+        <p class="hero-copy" id="problem-statement"></p>
+      </header>
+
+      <main class="layout">
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Why this repo exists</h2>
+            <p>The dashboard translates the prototype into plain English.</p>
+          </div>
+          <div class="concept-grid" id="concept-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Current status</h2>
+            <p>What is already implemented versus what is still planned.</p>
+          </div>
+          <div class="status-block">
+            <h3>Implemented now</h3>
+            <p id="implemented-copy"></p>
+          </div>
+          <div class="status-block">
+            <h3>Planned next</h3>
+            <p id="planned-copy"></p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Proof of improvement</h2>
+            <p>What changed, why it matters, what code was added, and how tests prove it.</p>
+          </div>
+          <div id="improvement-list" class="stack"></div>
+          <h3>Code added</h3>
+          <ul id="code-added-list" class="bullet-list"></ul>
+          <h3>Test proof</h3>
+          <ul id="test-proof-list" class="bullet-list"></ul>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Interactive demo</h2>
+            <p>Create sessions, route them again, and change server health/load live.</p>
+          </div>
+          <div class="controls">
+            <button id="create-session-button" class="button button-primary">Create new session</button>
+            <div class="inline-form">
+              <input id="route-session-input" placeholder="Enter existing session id" />
+              <button id="route-session-button" class="button">Route session</button>
+            </div>
+            <button id="reset-button" class="button button-ghost">Reset demo state</button>
+          </div>
+          <div class="walkthrough">
+            <h3>Suggested walkthrough</h3>
+            <ol id="walkthrough-list"></ol>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Fleet health</h2>
+            <p>Fake MCP server instances used for the local demo.</p>
+          </div>
+          <div id="summary-strip" class="summary-strip"></div>
+          <div id="instance-grid" class="instance-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Sessions</h2>
+            <p>Session affinity stays visible here.</p>
+          </div>
+          <div id="session-table"></div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Routing decisions</h2>
+            <p>Every decision is shown step by step.</p>
+          </div>
+          <div id="event-log" class="event-log"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -94,3 +94,21 @@ test("fails clearly when no instance can accept a new session", () => {
     /No healthy server instance is accepting new sessions/,
   );
 });
+
+test("explains routing decisions step by step for the demo dashboard", () => {
+  const registry = new MemorySessionRegistry();
+  const router = new LoadRouter({ sessionRegistry: registry, loadThreshold: 0.7 });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.65 });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.2 });
+
+  const decision = router.explainRoute("session-9");
+
+  assert.equal(decision.serverInstanceId, "server-b");
+  assert.equal(decision.reusedExistingSession, false);
+  assert.ok(Array.isArray(decision.trace));
+  assert.equal(decision.trace[0].type, "lookup");
+  assert.ok(decision.trace.some((entry) => entry.type === "instance-evaluated"));
+  assert.ok(decision.trace.some((entry) => entry.type === "instance-selected"));
+  assert.ok(decision.trace.some((entry) => entry.type === "session-assigned"));
+});

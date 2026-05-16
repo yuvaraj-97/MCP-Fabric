@@ -5,7 +5,9 @@
   "description": "Session-aware, transport-agnostic infrastructure for MCP-compatible deployments.",
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "demo": "node apps/local-dashboard/server.js",
+    "check": "npm test"
   },
   "engines": {
     "node": ">=20"
