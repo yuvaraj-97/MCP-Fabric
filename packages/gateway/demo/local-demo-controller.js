@@ -80,9 +80,9 @@ const DASHBOARD_COPY = {
     "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
   ],
   runtime: {
-    title: "Real HTTP/SSE gateway preview",
+    title: "Real HTTP/SSE gateway view",
     body:
-      "This section uses the real in-process HTTP/SSE gateway controller, so you can compare the explainer demo with transport-backed session behavior on the same page.",
+      "This section uses the real in-process HTTP/SSE gateway controller, so the main dashboard can show both the explainer model and actual transport-backed gateway behavior on the same page.",
   },
 };
 
@@ -219,6 +219,11 @@ export class LocalDemoController {
       kind: "runtime-session",
       title: `Initialized runtime session ${result.sessionId}`,
       summary: `The in-process HTTP/SSE gateway assigned ${result.sessionId} to ${result.serverInstanceId}.`,
+      details: [
+        `sessionId = ${result.sessionId}`,
+        `serverInstanceId = ${result.serverInstanceId}`,
+        `reusedExistingSession = ${result.reusedExistingSession}`,
+      ],
     });
 
     return {
@@ -242,6 +247,12 @@ export class LocalDemoController {
       kind: "runtime-echo",
       title: `Echoed runtime session ${normalizedSessionId}`,
       summary: `The in-process HTTP/SSE gateway kept ${normalizedSessionId} on ${result.serverInstanceId}.`,
+      details: [
+        `sessionId = ${result.sessionId}`,
+        `serverInstanceId = ${result.serverInstanceId}`,
+        `message = ${result.result.message}`,
+        `requestCount = ${result.result.requestCount}`,
+      ],
     });
 
     return {
@@ -321,6 +332,7 @@ export class LocalDemoController {
               kind: "runtime-sse",
               title: `Runtime SSE: ${event.event}`,
               summary: `${event.event} for ${sessionId} on ${event.data?.serverInstanceId ?? "unknown-server"}.`,
+              details: flattenRuntimeEventDetails(event),
             });
           }
           collector.chunks = [];
@@ -413,4 +425,18 @@ function parseRuntimeEvents(rawBody) {
         data: data ? JSON.parse(data) : null,
       };
     });
+}
+
+function flattenRuntimeEventDetails(event) {
+  if (!event?.data || typeof event.data !== "object") {
+    return [];
+  }
+
+  return Object.entries(event.data).map(([key, value]) => {
+    if (value && typeof value === "object") {
+      return `${key} = ${JSON.stringify(value)}`;
+    }
+
+    return `${key} = ${String(value)}`;
+  });
 }

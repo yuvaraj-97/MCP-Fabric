@@ -328,6 +328,11 @@ function renderRuntime(runtime) {
           <h3>${escapeHtml(event.title)}</h3>
           <p>${escapeHtml(event.summary)}</p>
           <p>${escapeHtml(new Date(event.timestamp).toLocaleString())}</p>
+          ${
+            Array.isArray(event.details) && event.details.length > 0
+              ? `<ol>${event.details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}</ol>`
+              : ""
+          }
         </article>
       `,
     )

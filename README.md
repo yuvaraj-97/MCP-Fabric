@@ -157,45 +157,36 @@ Targeted HTTP/SSE parity and failover tests can still be run separately with:
 npm run test:integration
 ```
 
-## Run Demos
+## Primary Demo
 
-| Demo | Command | Port | Purpose |
-| --- | --- | --- | --- |
-| Local dashboard | `npm run demo` | `4321` | Beginner-friendly explanation of the project and routing behavior |
-| stdio example | `npm run demo:stdio` | none | Shared example server over stdio |
-| Single-instance HTTP/SSE inspector | `npm run demo:http` | `3000` | Inspect one gateway-backed HTTP/SSE server |
-| Multi-instance gateway demo | `npm run demo:multi` | `3001` | Inspect sticky routing and failover across multiple instances |
-| Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
-
-Run the local HTTP/SSE inspector with:
+Start here:
 
 ```sh
-npm run demo:http
-```
-
-Run the multi-instance sticky-session inspector with:
-
-```sh
-node examples/multi-server-load-balanced-demo/server.js
+npm run demo
 ```
 
 Then open:
 
 ```text
-http://127.0.0.1:3001/inspector
+http://127.0.0.1:4321
 ```
 
-Run the load generator locally:
+This is the main beginner-friendly entrypoint. It now shows both:
 
-```sh
-node examples/multi-server-load-balanced-demo/load-generator.js http://127.0.0.1:3001 25 100
-```
+- the explainer routing demo
+- a real in-process HTTP/SSE gateway view
 
-The same load generator can target the live domain:
+Use the other demos when you want a narrower transport-specific deep dive.
 
-```sh
-node examples/multi-server-load-balanced-demo/load-generator.js https://core-tensor.com 25 100
-```
+## Run Demos
+
+| Demo | Command | Port | Purpose |
+| --- | --- | --- | --- |
+| Local dashboard | `npm run demo` | `4321` | Main demo: beginner-friendly explanation plus real in-process gateway view |
+| stdio example | `npm run demo:stdio` | none | Shared example server over stdio |
+| Single-instance HTTP/SSE inspector | `npm run demo:http` | `3000` | Inspect one gateway-backed HTTP/SSE server |
+| Multi-instance gateway demo | `npm run demo:multi` | `3001` | Inspect sticky routing and failover across multiple instances |
+| Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
 
 ## Run Tests
 
@@ -219,10 +210,6 @@ npm run demo
 ```
 
 Then open `http://127.0.0.1:4321`.
-
-This is the main beginner-friendly dashboard for understanding the repo.
-Use the HTTP/SSE inspector separately when you want to inspect real gateway and
-SSE behavior.
 
 ## What The UI Demonstrates
 
@@ -250,6 +237,9 @@ It also lets you interactively:
 - see overloaded instances skipped for new sessions
 - mark a server unhealthy and watch reassignment happen
 - inspect routing decisions step by step
+- create a real in-process HTTP/SSE gateway session
+- send runtime echoes through that real gateway path
+- inspect richer live runtime SSE event payloads from inside the same dashboard
 
 ## HTTP/SSE Inspector
 
@@ -280,6 +270,12 @@ Then open:
 
 ```text
 http://127.0.0.1:3001/inspector
+```
+
+Run the load generator locally:
+
+```sh
+npm run demo:load:local
 ```
 
 ## Checks

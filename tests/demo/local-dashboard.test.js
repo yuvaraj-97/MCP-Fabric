@@ -41,7 +41,7 @@ test("dashboard handler serves the UI shell and live state", async () => {
     url: "/",
   });
   assert.equal(htmlResponse.statusCode, 200);
-  assert.match(htmlResponse.body, /Current milestone/);
+  assert.match(htmlResponse.body, /Primary local demo/);
   assert.match(htmlResponse.body, /Reusable core plus local MCP scaling demo/);
   assert.match(
     htmlResponse.body,
@@ -101,6 +101,9 @@ test("dashboard handler can create and use a real in-process runtime session", a
   const echoed = JSON.parse(echoedResponse.body);
   assert.equal(echoed.result.reusedExistingSession, true);
   assert.ok(echoed.state.runtime.events.length >= 1);
+  assert.ok(
+    echoed.state.runtime.events.some((event) => Array.isArray(event.details) && event.details.length > 0),
+  );
 });
 
 async function invokeHandler(handler, { method, url, headers = {}, body }) {
