@@ -13,17 +13,11 @@ export function createHttpSseGatewayServer({
   loadThreshold = 0.7,
   sessionRegistry = new MemorySessionRegistry(),
 } = {}) {
-  const router = new LoadRouter({ sessionRegistry, loadThreshold });
-  const applications = new Map();
-  const eventStreams = new Map();
-
-  for (const instance of serverInstances) {
-    router.upsertInstance(instance);
-    applications.set(
-      instance.serverInstanceId,
-      createDemoApplicationServer({ serverInstanceId: instance.serverInstanceId }),
-    );
-  }
+  const controller = createHttpSseGatewayController({
+    serverInstances,
+    loadThreshold,
+    sessionRegistry,
+  });
 
   const server = createServer(async (request, response) => {
     try {
@@ -32,28 +26,21 @@ export function createHttpSseGatewayServer({
       if (request.method === "GET" && url.pathname === "/health") {
         return sendJson(response, 200, {
           ok: true,
-          instances: router.listInstances(),
-          sessions: sessionRegistry.list(),
+          instances: controller.router.listInstances(),
+          sessions: controller.sessionRegistry.list(),
         });
       }
 
       if (request.method === "GET" && url.pathname === "/sessions") {
         return sendJson(response, 200, {
-          instances: router.listInstances(),
-          sessions: sessionRegistry.list(),
+          instances: controller.router.listInstances(),
+          sessions: controller.sessionRegistry.list(),
         });
       }
 
       if (request.method === "POST" && url.pathname === "/instances") {
         const body = await readJsonBody(request);
-        const updated = router.upsertInstance(body);
-        if (!applications.has(updated.serverInstanceId)) {
-          applications.set(
-            updated.serverInstanceId,
-            createDemoApplicationServer({ serverInstanceId: updated.serverInstanceId }),
-          );
-        }
-
+        const updated = controller.upsertInstance(body);
         return sendJson(response, 200, updated);
       }
 
@@ -70,14 +57,14 @@ export function createHttpSseGatewayServer({
           "Access-Control-Allow-Origin": "*",
         });
 
-        addEventStream(eventStreams, sessionId, response);
+        controller.attachEventStream(sessionId, response);
         writeSse(response, "connected", {
           sessionId,
-          route: sessionRegistry.get(sessionId) ?? null,
+          route: controller.sessionRegistry.get(sessionId) ?? null,
         });
 
         request.on("close", () => {
-          removeEventStream(eventStreams, sessionId, response);
+          controller.detachEventStream(sessionId, response);
         });
 
         return;
@@ -85,69 +72,8 @@ export function createHttpSseGatewayServer({
 
       if (request.method === "POST" && url.pathname === "/message") {
         const body = await readJsonBody(request);
-        const method = body.method;
-        const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
-        const existingSessionRecord = sessionId ? sessionRegistry.get(sessionId) : undefined;
-        const route = router.routeSession(sessionId);
-        const application = applications.get(route.serverInstanceId);
-
-        if (method !== "initialize" && !application.getSessionState(sessionId)) {
-          const rehydrated = await application.handleMessage(
-            {
-              jsonrpc: "2.0",
-              id: `${sessionId}:rehydrate`,
-              method: "initialize",
-              params: {
-                clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
-              },
-              sessionId,
-            },
-            createGatewayContext({
-              sessionId,
-              route,
-              reusedExistingSession: false,
-              eventStreams,
-            }),
-          );
-          assertGatewayResult(rehydrated);
-        }
-
-        const envelope = await application.handleMessage(
-          {
-            jsonrpc: "2.0",
-            id: body.id ?? `${sessionId}:${method}`,
-            method,
-            params: body.params,
-            sessionId,
-          },
-          createGatewayContext({
-            sessionId,
-            route,
-            reusedExistingSession: route.reusedExistingSession,
-            eventStreams,
-          }),
-        );
-        const result = assertGatewayResult(envelope);
-
-        if (method === "initialize") {
-          sessionRegistry.assign(sessionId, route.serverInstanceId, {
-            clientId: body.params?.clientId ?? "anonymous-client",
-          });
-        }
-
-        publishEvent(eventStreams, sessionId, "route.selected", {
-          sessionId,
-          serverInstanceId: route.serverInstanceId,
-          reusedExistingSession: route.reusedExistingSession,
-          observedAt: new Date().toISOString(),
-        });
-
-        return sendJson(response, 200, {
-          sessionId,
-          serverInstanceId: route.serverInstanceId,
-          reusedExistingSession: route.reusedExistingSession,
-          result,
-        });
+        const result = await controller.handleGatewayMessage(body);
+        return sendJson(response, 200, result);
       }
 
       if (request.method === "GET" && url.pathname === "/inspector") {
@@ -166,9 +92,9 @@ export function createHttpSseGatewayServer({
 
   return {
     server,
-    router,
-    sessionRegistry,
-    applications,
+    router: controller.router,
+    sessionRegistry: controller.sessionRegistry,
+    applications: controller.applications,
     listen(port = 0) {
       return new Promise((resolve) => {
         server.listen(port, () => {
@@ -187,6 +113,118 @@ export function createHttpSseGatewayServer({
           resolve();
         });
       });
+    },
+  };
+}
+
+export function createHttpSseGatewayController({
+  serverInstances = [
+    { serverInstanceId: "server-a", load: 0.2, healthy: true, acceptingNewSessions: true },
+    { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
+  ],
+  loadThreshold = 0.7,
+  sessionRegistry = new MemorySessionRegistry(),
+} = {}) {
+  const router = new LoadRouter({ sessionRegistry, loadThreshold });
+  const applications = new Map();
+  const eventStreams = new Map();
+
+  for (const instance of serverInstances) {
+    router.upsertInstance(instance);
+    applications.set(
+      instance.serverInstanceId,
+      createDemoApplicationServer({ serverInstanceId: instance.serverInstanceId }),
+    );
+  }
+
+  return {
+    router,
+    sessionRegistry,
+    applications,
+    upsertInstance(instance) {
+      const updated = router.upsertInstance(instance);
+      if (!applications.has(updated.serverInstanceId)) {
+        applications.set(
+          updated.serverInstanceId,
+          createDemoApplicationServer({ serverInstanceId: updated.serverInstanceId }),
+        );
+      }
+
+      return updated;
+    },
+    attachEventStream(sessionId, response) {
+      addEventStream(eventStreams, sessionId, response);
+    },
+    detachEventStream(sessionId, response) {
+      removeEventStream(eventStreams, sessionId, response);
+    },
+    async handleGatewayMessage(body) {
+      const method = body.method;
+      const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
+      const existingSessionRecord = sessionId ? sessionRegistry.get(sessionId) : undefined;
+      const route = router.routeSession(sessionId);
+      const application = applications.get(route.serverInstanceId);
+
+      if (method !== "initialize" && !application.getSessionState(sessionId)) {
+        const rehydrated = await application.handleMessage(
+          {
+            jsonrpc: "2.0",
+            id: `${sessionId}:rehydrate`,
+            method: "initialize",
+            params: {
+              clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+            },
+            sessionId,
+          },
+          createGatewayContext({
+            sessionId,
+            route,
+            reusedExistingSession: false,
+            eventStreams,
+          }),
+        );
+        assertGatewayResult(rehydrated);
+      }
+
+      const envelope = await application.handleMessage(
+        {
+          jsonrpc: "2.0",
+          id: body.id ?? `${sessionId}:${method}`,
+          method,
+          params: body.params,
+          sessionId,
+        },
+        createGatewayContext({
+          sessionId,
+          route,
+          reusedExistingSession: route.reusedExistingSession,
+          eventStreams,
+        }),
+      );
+      const result = assertGatewayResult(envelope);
+
+      if (method === "initialize") {
+        sessionRegistry.assign(sessionId, route.serverInstanceId, {
+          clientId: body.params?.clientId ?? "anonymous-client",
+        });
+      }
+
+      publishEvent(eventStreams, sessionId, "route.selected", {
+        sessionId,
+        serverInstanceId: route.serverInstanceId,
+        reusedExistingSession: route.reusedExistingSession,
+        observedAt: new Date().toISOString(),
+      });
+
+      return {
+        sessionId,
+        serverInstanceId: route.serverInstanceId,
+        reusedExistingSession: route.reusedExistingSession,
+        result,
+      };
+    },
+    listPublishedEvents(sessionId) {
+      return Array.from(eventStreams.get(sessionId) ?? []);
     },
   };
 }
