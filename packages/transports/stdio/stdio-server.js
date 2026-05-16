@@ -1,6 +1,6 @@
 import readline from "node:readline";
 
-import { createDemoApplication } from "../../core/protocol-adapter/demo-application.js";
+import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-application-server.js";
 
 export function startStdioServer({
   input = process.stdin,
@@ -8,7 +8,7 @@ export function startStdioServer({
   error = process.stderr,
   serverInstanceId = process.env.SERVER_INSTANCE_ID ?? "stdio-server-1",
 } = {}) {
-  const app = createDemoApplication({ serverInstanceId });
+  const app = createDemoApplicationServer({ serverInstanceId });
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
 
   rl.on("line", async (line) => {
@@ -18,28 +18,30 @@ export function startStdioServer({
 
     try {
       const message = JSON.parse(line);
-      const response = await app.handleRequest({
+      const response = await app.handleMessage({
+        jsonrpc: "2.0",
+        id: message.id ?? null,
         method: message.method,
         params: message.params,
         sessionId: message.sessionId,
-        emitEvent: (event, payload) => {
-          writeJsonLine(output, {
-            jsonrpc: "2.0",
-            method: "event",
-            params: {
-              event,
-              payload,
-              serverInstanceId,
-            },
-          });
+      }, {
+        sessionId: message.sessionId,
+        transport: "stdio-line",
+        metadata: {
+          emitEvent(event, payload) {
+            writeJsonLine(output, {
+              jsonrpc: "2.0",
+              method: "event",
+              params: {
+                event,
+                payload,
+                serverInstanceId,
+              },
+            });
+          },
         },
       });
-
-      writeJsonLine(output, {
-        jsonrpc: "2.0",
-        id: message.id ?? null,
-        result: response,
-      });
+      writeJsonLine(output, response);
     } catch (cause) {
       const errorPayload = {
         jsonrpc: "2.0",

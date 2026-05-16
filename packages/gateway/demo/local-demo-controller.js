@@ -11,7 +11,7 @@ const DEFAULT_INSTANCES = [
 const DASHBOARD_COPY = {
   title: "MCP Scaling Demo Dashboard",
   problem:
-    "This repo explores how to keep MCP protocol semantics intact while adding deployment infrastructure for multi-instance routing, session stickiness, and load-aware decisions.",
+    "This repo keeps MCP protocol semantics intact while adding reusable core logic, transport adapters, and deployment infrastructure for multi-instance routing, session stickiness, and load-aware decisions.",
   concepts: [
     {
       title: "Session affinity",
@@ -26,37 +26,39 @@ const DASHBOARD_COPY = {
     {
       title: "Option 1 library",
       body:
-        "Option 1 packages the routing, session registry, and transport-neutral primitives as reusable library code that other MCP deployments can embed.",
+        "Option 1 packages the shared MCP logic, session context, and transport hooks as reusable library code that other MCP deployments can embed.",
     },
     {
       title: "Option 2 gateway",
       body:
-        "Option 2 runs a standalone self-hosted gateway in front of multiple MCP server instances so teams can centralize routing without changing server business logic.",
+        "Option 2 runs a standalone self-hosted gateway in front of multiple MCP server instances so teams can centralize sticky routing, SSE visibility, and failover behavior without changing server business logic.",
     },
   ],
   status: {
     implemented:
-      "Today the repo has a reusable transport-neutral MCP core, a basic stdio adapter, an in-memory session registry, a load-aware router, and this local dashboard that explains the scaling work step by step.",
+      "Today the repo has a reusable MCP core, a session context helper, a framed stdio adapter, a newline stdio demo harness, an HTTP/SSE gateway, an in-memory session registry, a load-aware router, and this local dashboard.",
     planned:
-      "Next comes HTTP/SSE support, durable session state, and a fuller self-hosted gateway layer that can sit in front of real MCP servers.",
+      "Next comes durable session state, one shared application boundary across all transports, and fuller self-hosted gateway packaging for real MCP deployments.",
   },
   improvements: [
     {
       title: "What improved",
       body:
-        "The prototype now has a real reusable core library slice, plus the local dashboard that makes the routing and architecture story visible without reading code only.",
+        "The prototype now has both transport-level demos and a reusable core slice, while the dashboard makes the routing and architecture story visible without reading code only.",
     },
     {
       title: "Why it matters",
       body:
-        "It proves the recommended path is working: shared MCP logic can live in a reusable core, while session stickiness, overload protection, and unhealthy-instance reassignment remain visible at the gateway layer.",
+        "It proves the same application behavior can be reached through stdio and HTTP/SSE while session stickiness, overload protection, and unhealthy-instance reassignment remain visible at the gateway layer.",
     },
   ],
   codeAdded: [
     "packages/gateway/load-balancer/load-router.js now exposes routing traces for explanation.",
     "packages/core/protocol-adapter/mcp-application-server.js now provides a transport-neutral MCP-compatible request dispatcher.",
+    "packages/core/protocol-adapter/demo-application-server.js now gives the demo application the same handleMessage boundary used by multiple transports.",
     "packages/transports/stdio/stdio-transport.js now provides a real stdio transport adapter with Content-Length framing.",
-    "examples/shared/scaling-demo-server.js and examples/stdio-server/server.js prove one shared example server can run through the reusable core.",
+    "packages/transports/http-sse/gateway-server.js now provides a sticky-session HTTP/SSE gateway with an inspector and SSE event streaming.",
+    "examples/shared/scaling-demo-server.js, examples/stdio-server/server.js, and examples/http-sse-server/server.js prove the transports can be exercised locally.",
     "packages/gateway/demo/local-demo-controller.js simulates fake MCP instances, sessions, and decision logs.",
     "apps/local-dashboard/server.js serves the local dashboard and JSON API.",
     "apps/local-dashboard/public/* renders the self-explaining UI and interactive controls.",
@@ -64,9 +66,11 @@ const DASHBOARD_COPY = {
   testProof: [
     "Transport-agnostic tests verify initialize, tools/list, tools/call, and notifications through the reusable core.",
     "Stdio adapter tests verify framed MCP-style input and output behavior.",
+    "Demo-application parity tests verify the same basic behavior can run through both stdio and HTTP/SSE-oriented flows.",
     "Session registry unit tests verify assign, update, delete, deleteByServer, and list copy behavior.",
     "Router tests verify least-loaded selection, sticky existing sessions, overload blocking, unhealthy reassignment, and trace output.",
     "Dashboard smoke tests verify the local UI and API start correctly and expose live state.",
+    "Socket-bound HTTP/SSE tests are kept as integration coverage because they exercise real HTTP and SSE wiring.",
   ],
   walkthrough: [
     "Create a new session and watch the least-loaded healthy instance win.",

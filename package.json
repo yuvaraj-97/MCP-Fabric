@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node tests/run-tests.js",
+    "test:integration": "node --test tests/transport-agnostic/stdio-http-parity.test.js tests/failover/http-sse-gateway.test.js",
     "demo": "node apps/local-dashboard/server.js",
     "demo:stdio": "node examples/stdio-server/server.js",
     "check": "npm test"

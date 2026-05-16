@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
-import { createDemoApplication } from "../../core/protocol-adapter/demo-application.js";
+import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-application-server.js";
 import { LoadRouter } from "../../gateway/load-balancer/load-router.js";
 import { MemorySessionRegistry } from "../../gateway/session-registry/memory-session-registry.js";
 
@@ -21,7 +21,7 @@ export function createHttpSseGatewayServer({
     router.upsertInstance(instance);
     applications.set(
       instance.serverInstanceId,
-      createDemoApplication({ serverInstanceId: instance.serverInstanceId }),
+      createDemoApplicationServer({ serverInstanceId: instance.serverInstanceId }),
     );
   }
 
@@ -50,7 +50,7 @@ export function createHttpSseGatewayServer({
         if (!applications.has(updated.serverInstanceId)) {
           applications.set(
             updated.serverInstanceId,
-            createDemoApplication({ serverInstanceId: updated.serverInstanceId }),
+            createDemoApplicationServer({ serverInstanceId: updated.serverInstanceId }),
           );
         }
 
@@ -92,38 +92,42 @@ export function createHttpSseGatewayServer({
         const application = applications.get(route.serverInstanceId);
 
         if (method !== "initialize" && !application.getSessionState(sessionId)) {
-          await application.handleRequest({
-            method: "initialize",
-            sessionId,
-            params: {
-              clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+          const rehydrated = await application.handleMessage(
+            {
+              jsonrpc: "2.0",
+              id: `${sessionId}:rehydrate`,
+              method: "initialize",
+              params: {
+                clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+              },
+              sessionId,
             },
-            emitEvent: (event, payload) => {
-              publishEvent(eventStreams, sessionId, event, {
-                sessionId,
-                serverInstanceId: route.serverInstanceId,
-                reusedExistingSession: false,
-                payload,
-                observedAt: new Date().toISOString(),
-              });
-            },
-          });
+            createGatewayContext({
+              sessionId,
+              route,
+              reusedExistingSession: false,
+              eventStreams,
+            }),
+          );
+          assertGatewayResult(rehydrated);
         }
 
-        const result = await application.handleRequest({
-          method,
-          params: body.params,
-          sessionId,
-          emitEvent: (event, payload) => {
-            publishEvent(eventStreams, sessionId, event, {
-              sessionId,
-              serverInstanceId: route.serverInstanceId,
-              reusedExistingSession: route.reusedExistingSession,
-              payload,
-              observedAt: new Date().toISOString(),
-            });
+        const envelope = await application.handleMessage(
+          {
+            jsonrpc: "2.0",
+            id: body.id ?? `${sessionId}:${method}`,
+            method,
+            params: body.params,
+            sessionId,
           },
-        });
+          createGatewayContext({
+            sessionId,
+            route,
+            reusedExistingSession: route.reusedExistingSession,
+            eventStreams,
+          }),
+        );
+        const result = assertGatewayResult(envelope);
 
         if (method === "initialize") {
           sessionRegistry.assign(sessionId, route.serverInstanceId, {
@@ -185,6 +189,36 @@ export function createHttpSseGatewayServer({
       });
     },
   };
+}
+
+function createGatewayContext({ sessionId, route, reusedExistingSession, eventStreams }) {
+  return {
+    sessionId,
+    transport: "http-sse",
+    metadata: {
+      emitEvent(event, payload) {
+        publishEvent(eventStreams, sessionId, event, {
+          sessionId,
+          serverInstanceId: route.serverInstanceId,
+          reusedExistingSession,
+          payload,
+          observedAt: new Date().toISOString(),
+        });
+      },
+    },
+  };
+}
+
+function assertGatewayResult(envelope) {
+  if (!envelope) {
+    throw new Error("Expected request response envelope");
+  }
+
+  if (envelope.error) {
+    throw new Error(envelope.error.message ?? "Gateway request failed");
+  }
+
+  return envelope.result;
 }
 
 async function readJsonBody(request) {

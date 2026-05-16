@@ -53,12 +53,17 @@ Runtime Infrastructure
 
 ```text
 docs/
+  agentic-scale-up-plan.md
   design.md
   session-affinity.md
   load-balancing.md
   stdio-vs-http.md
   prototype-roadmap.md
   public-proposal.md
+  test-strategy.md
+
+apps/
+  local-dashboard/
 
 packages/
   core/
@@ -71,6 +76,7 @@ packages/
   gateway/
     load-balancer/
     session-registry/
+    demo/
 
 examples/
   stdio-server/
@@ -88,11 +94,8 @@ The original research brief is kept in
 
 ## Current Status
 
-This is an early research and prototype scaffold. The first implemented slice is
-a dependency-free in-memory session registry plus load-aware router. The
-repository now also includes a runnable transport-neutral demo application, a
-`stdio` harness, an HTTP/SSE gateway with an inspector page, and local tests
-covering transport parity, sticky sessions, SSE visibility, and failover.
+This is an early research and prototype scaffold. The repo now includes both a
+reusable core slice and local transport/gateway demos.
 
 The implemented slices today are:
 
@@ -109,8 +112,9 @@ The implemented slices today are:
   HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
   visibility, failover, and dashboard startup
 
-Durable session handling and fuller gateway packaging are still the next
-recommended build steps.
+Durable session handling, cleaner unification of the shared application
+boundary, and fuller gateway packaging are still the next recommended build
+steps.
 
 ## Recommended Path
 
@@ -135,10 +139,17 @@ Use Node.js 20 or newer.
 npm install
 ```
 
-Run the full local test suite with:
+Run the sandbox-safe local test suite with:
 
 ```sh
-node tests/run-tests.js
+npm test
+```
+
+Run the socket-bound HTTP/SSE integration suite when your environment allows
+local listeners:
+
+```sh
+npm run test:integration
 ```
 
 Run the local HTTP/SSE inspector with:
@@ -194,6 +205,10 @@ npm run demo
 
 Then open `http://127.0.0.1:4321`.
 
+This is the main beginner-friendly dashboard for understanding the repo.
+Use the HTTP/SSE inspector separately when you want to inspect real gateway and
+SSE behavior.
+
 ## What The UI Demonstrates
 
 The local dashboard explains, in plain English:
@@ -220,6 +235,23 @@ It also lets you interactively:
 - see overloaded instances skipped for new sessions
 - mark a server unhealthy and watch reassignment happen
 - inspect routing decisions step by step
+
+## HTTP/SSE Inspector
+
+Run:
+
+```sh
+node examples/http-sse-server/server.js
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3001/inspector
+```
+
+Use this when you want to inspect real session stickiness, SSE event ordering,
+and gateway behavior rather than the higher-level local dashboard.
 
 ## Checks
 

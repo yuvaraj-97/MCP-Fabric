@@ -103,41 +103,63 @@ preferred self-hosted gateway direction.
 
 ## What Exists Now In The Repo
 
-Today the implemented code is still narrow and focused on routing policy.
+The repo is no longer just a routing prototype. It now has a real reusable core
+slice plus transport-specific runtime demos.
 
 ### Implemented
 
+- [`packages/core/protocol-adapter/mcp-application-server.js`](../packages/core/protocol-adapter/mcp-application-server.js)
+  provides a transport-neutral MCP-compatible request dispatcher.
+- [`packages/core/session/session-context.js`](../packages/core/session/session-context.js)
+  provides a shared session context shape for handlers.
+- [`packages/transports/stdio/stdio-transport.js`](../packages/transports/stdio/stdio-transport.js)
+  provides framed stdio transport handling.
+- [`packages/transports/http-sse/gateway-server.js`](../packages/transports/http-sse/gateway-server.js)
+  provides a sticky-session HTTP/SSE gateway with SSE event streaming and an
+  inspector UI.
+- [`packages/core/protocol-adapter/demo-application.js`](../packages/core/protocol-adapter/demo-application.js)
+  and
+  [`packages/core/protocol-adapter/demo-application-server.js`](../packages/core/protocol-adapter/demo-application-server.js)
+  provide a shared demo application plus a transport-facing server boundary.
 - [`packages/gateway/session-registry/memory-session-registry.js`](../packages/gateway/session-registry/memory-session-registry.js)
   provides an in-memory `session_id -> server_instance_id` registry.
 - [`packages/gateway/load-balancer/load-router.js`](../packages/gateway/load-balancer/load-router.js)
   provides load-aware routing and sticky existing-session behavior.
-- [`tests/session-routing/load-router.test.js`](../tests/session-routing/load-router.test.js)
-  covers least-loaded assignment, stickiness, overload protection, and
-  unhealthy-instance reassignment.
+- Example runtimes now exist for:
+  - [`examples/stdio-server/server.js`](../examples/stdio-server/server.js)
+  - [`examples/http-sse-server/server.js`](../examples/http-sse-server/server.js)
+  - [`examples/multi-server-load-balanced-demo/server.js`](../examples/multi-server-load-balanced-demo/server.js)
+- Automated coverage now includes:
+  - reusable core behavior
+  - stdio transport behavior
+  - demo-application parity
+  - routing/session tests
+  - dashboard smoke tests
+  - socket-bound HTTP/SSE integration tests
 - The existing docs already describe the intended architecture and roadmap:
   - [`docs/design.md`](./design.md)
   - [`docs/session-affinity.md`](./session-affinity.md)
   - [`docs/load-balancing.md`](./load-balancing.md)
   - [`docs/prototype-roadmap.md`](./prototype-roadmap.md)
+  - [`docs/test-strategy.md`](./test-strategy.md)
 
-### Newly added in Milestone 1
+### Current explanation milestone
 
-- A self-explaining local dashboard for demoing the current routing slice.
-- Routing traces so the UI can show each decision step by step.
-- Broader automated tests around registry behavior and dashboard smoke checks.
+- The local dashboard explains the current scaling work in plain English.
+- Routing traces make assignment decisions visible step by step.
+- The HTTP/SSE inspector exposes real session and SSE behavior for local
+  inspection.
 
 ## What Is Missing Before Scaling
 
-The current prototype proves one gateway policy slice, but it does not yet
-provide the full reusable stack needed for scale.
+The repo now proves the main architecture direction, but it is not yet a fully
+productized reusable stack.
 
 Missing pieces:
 
-- real transport-neutral core interfaces
-- application-facing MCP server abstraction
-- implemented `stdio` adapter
-- implemented HTTP/SSE adapter
-- end-to-end sample server using shared business logic
+- one fully shared application boundary used consistently by every transport
+- cleaner unification between the reusable MCP core and the newer demo/gateway
+  path
 - explicit reconnect and failure policies
 - durable session registry strategy
 - health/load reporting model for real instances
@@ -146,7 +168,7 @@ Missing pieces:
 
 ## Step-by-Step Implementation Plan
 
-### Phase 1: Stabilize the current routing prototype
+### Phase 1: Explain and validate the routing prototype
 
 Goal: make the current gateway logic visible, explainable, and testable.
 
@@ -229,18 +251,23 @@ Testing should grow with the architecture.
 
 ### Current milestone
 
+- unit tests for reusable MCP-core behavior
+- unit tests for session registry behavior
+- unit tests for load-aware routing behavior
+- tests for stdio transport framing
+- tests for demo-application parity
 - unit tests for session registry behavior
 - unit tests for load-aware routing behavior
 - tests for overloaded instance handling
 - tests for unhealthy instance reassignment
 - tests for existing-session stickiness
 - dashboard smoke test for local UI and API startup
+- socket-bound HTTP/SSE integration tests for real transport wiring
 
 ### Next stages
 
-- transport-neutral core tests
-- cross-transport parity tests
-- gateway integration tests
+- unify handler-level transport tests behind one shared server boundary
+- add socket-free handler/controller coverage for HTTP/SSE where possible
 - failure and reconnect tests
 - durable registry tests once persistence exists
 
@@ -267,6 +294,7 @@ through a local visual dashboard.
 - demonstrate routing behavior interactively
 - show decision logs step by step
 - show what code was added and what tests prove
+- link the dashboard story to the real HTTP/SSE inspector path
 
 ### Later demo goals
 

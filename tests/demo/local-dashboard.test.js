@@ -56,16 +56,17 @@ test("dashboard handler serves the UI shell and live state", async () => {
   const state = JSON.parse(stateResponse.body);
   assert.equal(state.dashboard.title, "MCP Scaling Demo Dashboard");
   assert.equal(state.instances.length, 3);
-  assert.match(state.dashboard.status.implemented, /reusable transport-neutral MCP core/);
-  assert.match(state.dashboard.status.planned, /HTTP\/SSE support/);
+  assert.match(state.dashboard.status.implemented, /HTTP\/SSE gateway/);
+  assert.match(state.dashboard.status.planned, /durable session state/);
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("mcp-application-server.js")));
+  assert.ok(state.dashboard.codeAdded.some((item) => item.includes("demo-application-server.js")));
   assert.ok(state.dashboard.testProof.some((item) => item.includes("Transport-agnostic tests")));
 });
 
 test("local demo controller exposes the reusable-core milestone copy", () => {
   const state = new LocalDemoController().getState();
 
-  assert.match(state.dashboard.problem, /keep MCP protocol semantics intact/);
+  assert.match(state.dashboard.problem, /transport adapters/);
   assert.equal(
     state.dashboard.walkthrough.at(-1),
     "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
