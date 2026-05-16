@@ -41,7 +41,12 @@ test("dashboard handler serves the UI shell and live state", async () => {
     url: "/",
   });
   assert.equal(htmlResponse.statusCode, 200);
-  assert.match(htmlResponse.body, /Self-explaining MCP scaling dashboard/);
+  assert.match(htmlResponse.body, /Current milestone/);
+  assert.match(htmlResponse.body, /Reusable core plus local MCP scaling demo/);
+  assert.match(
+    htmlResponse.body,
+    /What was added, why it matters, and how tests prove both the core and gateway behavior/,
+  );
 
   const stateResponse = await invokeHandler(handler, {
     method: "GET",
@@ -51,6 +56,23 @@ test("dashboard handler serves the UI shell and live state", async () => {
   const state = JSON.parse(stateResponse.body);
   assert.equal(state.dashboard.title, "MCP Scaling Demo Dashboard");
   assert.equal(state.instances.length, 3);
+  assert.match(state.dashboard.status.implemented, /reusable transport-neutral MCP core/);
+  assert.match(state.dashboard.status.planned, /HTTP\/SSE support/);
+  assert.ok(state.dashboard.codeAdded.some((item) => item.includes("mcp-application-server.js")));
+  assert.ok(state.dashboard.testProof.some((item) => item.includes("Transport-agnostic tests")));
+});
+
+test("local demo controller exposes the reusable-core milestone copy", () => {
+  const state = new LocalDemoController().getState();
+
+  assert.match(state.dashboard.problem, /keep MCP protocol semantics intact/);
+  assert.equal(
+    state.dashboard.walkthrough.at(-1),
+    "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
+  );
+  assert.ok(
+    state.dashboard.codeAdded.some((item) => item.includes("stdio transport adapter")),
+  );
 });
 
 async function invokeHandler(handler, { method, url, headers = {}, body }) {

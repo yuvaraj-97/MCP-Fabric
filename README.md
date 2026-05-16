@@ -90,16 +90,20 @@ The original research brief is kept in
 
 This is an early research and prototype scaffold.
 
-The implemented slice today is a dependency-free gateway policy prototype:
+The implemented slices today are:
 
+- reusable transport-neutral MCP application core
+- session context helper for shared handler execution
+- basic `stdio` adapter with framed JSON-RPC message handling
+- shared example server proving one tool set can run through the core
 - in-memory session registry
 - load-aware router
 - self-explaining local dashboard for routing behavior
-- automated tests for stickiness, overload protection, unhealthy-instance
-  reassignment, and dashboard startup
+- automated tests for core dispatch, `stdio` transport behavior, stickiness,
+  overload protection, unhealthy-instance reassignment, and dashboard startup
 
-The reusable library core and real transport adapters are still the next
-recommended build steps.
+HTTP/SSE support, durable session handling, and fuller gateway packaging are
+still the next recommended build steps.
 
 ## Recommended Path
 
@@ -130,6 +134,15 @@ npm install
 npm test
 ```
 
+## Run The stdio Example
+
+```sh
+npm run demo:stdio
+```
+
+This starts the shared example server over `stdio` using MCP-style
+`Content-Length` framing.
+
 ## Launch The Local UI
 
 ```sh
@@ -149,6 +162,11 @@ The local dashboard explains, in plain English:
 - what Option 2 gateway means
 - what is implemented now
 - what is still planned
+
+It now also explains that the repo has both:
+
+- a reusable core layer for MCP-compatible handler dispatch
+- a local routing/gateway demo layer for session affinity behavior
 
 It also lets you interactively:
 

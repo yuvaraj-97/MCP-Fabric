@@ -36,29 +36,34 @@ const DASHBOARD_COPY = {
   ],
   status: {
     implemented:
-      "Today the repo has an in-memory session registry, a load-aware router, and this local dashboard that explains each routing decision step by step.",
+      "Today the repo has a reusable transport-neutral MCP core, a basic stdio adapter, an in-memory session registry, a load-aware router, and this local dashboard that explains the scaling work step by step.",
     planned:
-      "Next comes durable session state, transport adapters, and a self-hosted gateway layer that can sit in front of real MCP servers.",
+      "Next comes HTTP/SSE support, durable session state, and a fuller self-hosted gateway layer that can sit in front of real MCP servers.",
   },
   improvements: [
     {
       title: "What improved",
       body:
-        "Milestone 1 adds an interactive local dashboard so non-technical reviewers can watch session routing happen instead of reading code only.",
+        "The prototype now has a real reusable core library slice, plus the local dashboard that makes the routing and architecture story visible without reading code only.",
     },
     {
       title: "Why it matters",
       body:
-        "It makes the scaling story visible: sticky sessions, overload protection, and unhealthy-instance reassignment can now be demonstrated live.",
+        "It proves the recommended path is working: shared MCP logic can live in a reusable core, while session stickiness, overload protection, and unhealthy-instance reassignment remain visible at the gateway layer.",
     },
   ],
   codeAdded: [
     "packages/gateway/load-balancer/load-router.js now exposes routing traces for explanation.",
+    "packages/core/protocol-adapter/mcp-application-server.js now provides a transport-neutral MCP-compatible request dispatcher.",
+    "packages/transports/stdio/stdio-transport.js now provides a real stdio transport adapter with Content-Length framing.",
+    "examples/shared/scaling-demo-server.js and examples/stdio-server/server.js prove one shared example server can run through the reusable core.",
     "packages/gateway/demo/local-demo-controller.js simulates fake MCP instances, sessions, and decision logs.",
     "apps/local-dashboard/server.js serves the local dashboard and JSON API.",
     "apps/local-dashboard/public/* renders the self-explaining UI and interactive controls.",
   ],
   testProof: [
+    "Transport-agnostic tests verify initialize, tools/list, tools/call, and notifications through the reusable core.",
+    "Stdio adapter tests verify framed MCP-style input and output behavior.",
     "Session registry unit tests verify assign, update, delete, deleteByServer, and list copy behavior.",
     "Router tests verify least-loaded selection, sticky existing sessions, overload blocking, unhealthy reassignment, and trace output.",
     "Dashboard smoke tests verify the local UI and API start correctly and expose live state.",
