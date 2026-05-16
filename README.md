@@ -88,22 +88,29 @@ The original research brief is kept in
 
 ## Current Status
 
-This is an early research and prototype scaffold.
+This is an early research and prototype scaffold. The first implemented slice is
+a dependency-free in-memory session registry plus load-aware router. The
+repository now also includes a runnable transport-neutral demo application, a
+`stdio` harness, an HTTP/SSE gateway with an inspector page, and local tests
+covering transport parity, sticky sessions, SSE visibility, and failover.
 
 The implemented slices today are:
 
 - reusable transport-neutral MCP application core
 - session context helper for shared handler execution
 - basic `stdio` adapter with framed JSON-RPC message handling
+- newline-delimited local `stdio` harness for transport parity checks
 - shared example server proving one tool set can run through the core
 - in-memory session registry
 - load-aware router
+- HTTP/SSE gateway with session stickiness and SSE event visibility
 - self-explaining local dashboard for routing behavior
 - automated tests for core dispatch, `stdio` transport behavior, stickiness,
-  overload protection, unhealthy-instance reassignment, and dashboard startup
+  HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
+  visibility, failover, and dashboard startup
 
-HTTP/SSE support, durable session handling, and fuller gateway packaging are
-still the next recommended build steps.
+Durable session handling and fuller gateway packaging are still the next
+recommended build steps.
 
 ## Recommended Path
 
@@ -126,6 +133,42 @@ Use Node.js 20 or newer.
 
 ```sh
 npm install
+```
+
+Run the full local test suite with:
+
+```sh
+node tests/run-tests.js
+```
+
+Run the local HTTP/SSE inspector with:
+
+```sh
+node examples/http-sse-server/server.js
+```
+
+Run the multi-instance sticky-session inspector with:
+
+```sh
+node examples/multi-server-load-balanced-demo/server.js
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3001/inspector
+```
+
+Run the load generator locally:
+
+```sh
+node examples/multi-server-load-balanced-demo/load-generator.js http://127.0.0.1:3001 25 100
+```
+
+The same load generator can target the live domain:
+
+```sh
+node examples/multi-server-load-balanced-demo/load-generator.js https://core-tensor.com 25 100
 ```
 
 ## Run Tests
