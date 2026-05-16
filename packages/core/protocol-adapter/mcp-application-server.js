@@ -1,4 +1,10 @@
 import { createSessionContext } from "../session/session-context.js";
+import {
+  createErrorResponse,
+  createSuccessResponse,
+  isNotification,
+  validateIncomingMessage,
+} from "./jsonrpc-envelope.js";
 
 export class McpApplicationServer {
   #serverInfo;
@@ -200,43 +206,6 @@ function publicToolDefinition(tool) {
     title: tool.title,
     description: tool.description,
     inputSchema: cloneValue(tool.inputSchema),
-  };
-}
-
-function validateIncomingMessage(message) {
-  if (!message || typeof message !== "object" || Array.isArray(message)) {
-    return "Incoming message must be an object";
-  }
-  if (message.jsonrpc !== "2.0") {
-    return "Incoming message must use JSON-RPC 2.0";
-  }
-  if (typeof message.method !== "string" || message.method.length === 0) {
-    return "Incoming message must include a method";
-  }
-
-  return null;
-}
-
-function isNotification(message) {
-  return !Object.hasOwn(message, "id");
-}
-
-function createSuccessResponse(id, result) {
-  return {
-    jsonrpc: "2.0",
-    id,
-    result,
-  };
-}
-
-function createErrorResponse(id, code, message) {
-  return {
-    jsonrpc: "2.0",
-    id,
-    error: {
-      code,
-      message,
-    },
   };
 }
 

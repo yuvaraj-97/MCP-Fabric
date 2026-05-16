@@ -1,4 +1,10 @@
 import { createDemoApplication } from "./demo-application.js";
+import {
+  createErrorResponse,
+  createSuccessResponse,
+  isNotification,
+  validateIncomingMessage,
+} from "./jsonrpc-envelope.js";
 
 export function createDemoApplicationServer({ serverInstanceId } = {}) {
   const application = createDemoApplication({ serverInstanceId });
@@ -9,9 +15,12 @@ export function createDemoApplicationServer({ serverInstanceId } = {}) {
       return application.getSessionState(sessionId);
     },
     async handleMessage(message, context = {}) {
-      validateMessage(message);
+      const messageValidationError = validateIncomingMessage(message);
+      if (messageValidationError) {
+        return createErrorResponse(null, -32600, messageValidationError);
+      }
 
-      if (!Object.hasOwn(message, "id")) {
+      if (isNotification(message)) {
         return null;
       }
 
@@ -23,30 +32,14 @@ export function createDemoApplicationServer({ serverInstanceId } = {}) {
           emitEvent: context.metadata?.emitEvent,
         });
 
-        return {
-          jsonrpc: "2.0",
-          id: message.id,
-          result,
-        };
+        return createSuccessResponse(message.id, result);
       } catch (cause) {
-        return {
-          jsonrpc: "2.0",
-          id: message.id ?? null,
-          error: {
-            message: cause instanceof Error ? cause.message : String(cause),
-          },
-        };
+        return createErrorResponse(
+          message.id ?? null,
+          -32603,
+          cause instanceof Error ? cause.message : String(cause),
+        );
       }
     },
   };
-}
-
-function validateMessage(message) {
-  if (!message || typeof message !== "object" || Array.isArray(message)) {
-    throw new TypeError("message must be an object");
-  }
-
-  if (typeof message.method !== "string" || message.method.length === 0) {
-    throw new TypeError("message.method must be a non-empty string");
-  }
 }
