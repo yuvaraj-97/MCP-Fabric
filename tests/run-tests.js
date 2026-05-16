@@ -1,6 +1,7 @@
 import "./session-routing/memory-session-registry.test.js";
 import "./session-routing/load-router.test.js";
 import "./transport-agnostic/mcp-application-server.test.js";
+import "./transport-agnostic/mcp-custom-methods.test.js";
 import "./transport-agnostic/stdio-transport.test.js";
 import "./transport-agnostic/demo-application.test.js";
 import "./transport-agnostic/demo-application-server.test.js";

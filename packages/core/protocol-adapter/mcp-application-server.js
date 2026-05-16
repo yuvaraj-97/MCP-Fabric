@@ -11,6 +11,7 @@ export class McpApplicationServer {
   #protocolVersion;
   #instructions;
   #tools = new Map();
+  #methodHandlers = new Map();
   #notificationLog = [];
 
   constructor({
@@ -31,6 +32,16 @@ export class McpApplicationServer {
     const normalized = normalizeToolDefinition(definition);
     this.#tools.set(normalized.name, normalized);
     return publicToolDefinition(normalized);
+  }
+
+  registerMethod(method, handler) {
+    assertNonEmptyString(method, "method");
+    if (typeof handler !== "function") {
+      throw new TypeError("method handler must be a function");
+    }
+
+    this.#methodHandlers.set(method, handler);
+    return method;
   }
 
   listTools() {
@@ -74,6 +85,15 @@ export class McpApplicationServer {
   }
 
   async #dispatchRequest(message, context) {
+    const customHandler = this.#methodHandlers.get(message.method);
+    if (customHandler) {
+      return customHandler({
+        params: cloneValue(message.params ?? {}),
+        context,
+        message: cloneValue(message),
+      });
+    }
+
     switch (message.method) {
       case "initialize":
         return {
