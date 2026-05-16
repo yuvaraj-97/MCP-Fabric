@@ -1,5 +1,6 @@
 import { LoadRouter } from "../load-balancer/load-router.js";
 import { MemorySessionRegistry } from "../session-registry/memory-session-registry.js";
+import { createHttpSseGatewayController } from "../../transports/http-sse/gateway-server.js";
 
 const DEFAULT_LOAD_THRESHOLD = 0.7;
 const DEFAULT_INSTANCES = [
@@ -78,6 +79,11 @@ const DASHBOARD_COPY = {
     "Route an existing session again and confirm it stays sticky to the same server.",
     "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
   ],
+  runtime: {
+    title: "Real HTTP/SSE gateway preview",
+    body:
+      "This section uses the real in-process HTTP/SSE gateway controller, so you can compare the explainer demo with transport-backed session behavior on the same page.",
+  },
 };
 
 export class LocalDemoController {
@@ -86,6 +92,9 @@ export class LocalDemoController {
   #router;
   #events = [];
   #nextSessionNumber = 1;
+  #runtimeController;
+  #runtimeCollectors = new Map();
+  #runtimeEvents = [];
 
   constructor({ loadThreshold = DEFAULT_LOAD_THRESHOLD, initialInstances = DEFAULT_INSTANCES } = {}) {
     if (typeof loadThreshold !== "number" || loadThreshold < 0 || loadThreshold > 1) {
@@ -102,7 +111,13 @@ export class LocalDemoController {
       sessionRegistry: this.#registry,
       loadThreshold: this.#loadThreshold,
     });
+    this.#runtimeController = createHttpSseGatewayController({
+      serverInstances: initialInstances,
+      loadThreshold: this.#loadThreshold,
+    });
     this.#events = [];
+    this.#runtimeCollectors = new Map();
+    this.#runtimeEvents = [];
     this.#nextSessionNumber = 1;
 
     for (const instance of initialInstances) {
@@ -141,6 +156,7 @@ export class LocalDemoController {
         overloadedInstances: instances.filter((instance) => instance.load >= this.#loadThreshold).length,
         activeSessions: sessions.length,
       },
+      runtime: this.#getRuntimeState(),
     };
   }
 
@@ -168,6 +184,10 @@ export class LocalDemoController {
       ...current,
       ...updates,
     });
+    this.#runtimeController.upsertInstance({
+      ...current,
+      ...updates,
+    });
 
     this.#recordEvent({
       kind: "instance-update",
@@ -182,6 +202,50 @@ export class LocalDemoController {
 
     return {
       instance: next,
+      state: this.getState(),
+    };
+  }
+
+  async createRuntimeSession(clientId) {
+    const result = await this.#runtimeController.handleGatewayMessage({
+      method: "initialize",
+      params: {
+        clientId: clientId ?? `dashboard-client-${this.#runtimeCollectors.size + 1}`,
+      },
+    });
+
+    this.#attachRuntimeCollector(result.sessionId);
+    this.#recordRuntimeEvent({
+      kind: "runtime-session",
+      title: `Initialized runtime session ${result.sessionId}`,
+      summary: `The in-process HTTP/SSE gateway assigned ${result.sessionId} to ${result.serverInstanceId}.`,
+    });
+
+    return {
+      result,
+      state: this.getState(),
+    };
+  }
+
+  async echoRuntimeSession(sessionId, message) {
+    const normalizedSessionId = normalizeRequiredSessionId(sessionId);
+    this.#attachRuntimeCollector(normalizedSessionId);
+    const result = await this.#runtimeController.handleGatewayMessage({
+      method: "echo",
+      sessionId: normalizedSessionId,
+      params: {
+        message: message ?? "dashboard runtime echo",
+      },
+    });
+
+    this.#recordRuntimeEvent({
+      kind: "runtime-echo",
+      title: `Echoed runtime session ${normalizedSessionId}`,
+      summary: `The in-process HTTP/SSE gateway kept ${normalizedSessionId} on ${result.serverInstanceId}.`,
+    });
+
+    return {
+      result,
       state: this.getState(),
     };
   }
@@ -226,6 +290,55 @@ export class LocalDemoController {
     };
 
     this.#events = [entry, ...this.#events].slice(0, 20);
+  }
+
+  #getRuntimeState() {
+    const instances = sortInstances(this.#runtimeController.router.listInstances());
+    const sessions = sortSessions(this.#runtimeController.sessionRegistry.list());
+    return {
+      title: DASHBOARD_COPY.runtime.title,
+      body: DASHBOARD_COPY.runtime.body,
+      instances,
+      sessions,
+      events: this.#runtimeEvents.map((event) => ({ ...event })),
+      latestSessionId: sessions.at(-1)?.sessionId ?? null,
+    };
+  }
+
+  #attachRuntimeCollector(sessionId) {
+    if (this.#runtimeCollectors.has(sessionId)) {
+      return this.#runtimeCollectors.get(sessionId);
+    }
+
+    const collector = {
+      sessionId,
+      chunks: [],
+      write: (chunk) => {
+        collector.chunks.push(String(chunk));
+        if (String(chunk).includes("\n\n")) {
+          for (const event of parseRuntimeEvents(collector.chunks.join(""))) {
+            this.#recordRuntimeEvent({
+              kind: "runtime-sse",
+              title: `Runtime SSE: ${event.event}`,
+              summary: `${event.event} for ${sessionId} on ${event.data?.serverInstanceId ?? "unknown-server"}.`,
+            });
+          }
+          collector.chunks = [];
+        }
+      },
+    };
+    this.#runtimeCollectors.set(sessionId, collector);
+    this.#runtimeController.attachEventStream(sessionId, collector);
+    return collector;
+  }
+
+  #recordRuntimeEvent(event) {
+    const entry = {
+      id: `runtime-event-${this.#runtimeEvents.length + 1}`,
+      timestamp: new Date().toISOString(),
+      ...event,
+    };
+    this.#runtimeEvents = [entry, ...this.#runtimeEvents].slice(0, 20);
   }
 }
 
@@ -284,4 +397,20 @@ function normalizeRequiredServerInstanceId(value) {
   }
 
   return value.trim();
+}
+
+function parseRuntimeEvents(rawBody) {
+  return rawBody
+    .split("\n\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const lines = entry.split("\n");
+      const event = lines.find((line) => line.startsWith("event:"))?.slice("event:".length).trim();
+      const data = lines.find((line) => line.startsWith("data:"))?.slice("data:".length).trim();
+      return {
+        event,
+        data: data ? JSON.parse(data) : null,
+      };
+    });
 }

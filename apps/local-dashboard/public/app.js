@@ -14,10 +14,16 @@ const elements = {
   summaryStrip: document.querySelector("#summary-strip"),
   instanceGrid: document.querySelector("#instance-grid"),
   sessionTable: document.querySelector("#session-table"),
+  runtimeSummary: document.querySelector("#runtime-summary"),
+  runtimeSessionTable: document.querySelector("#runtime-session-table"),
+  runtimeEventLog: document.querySelector("#runtime-event-log"),
   eventLog: document.querySelector("#event-log"),
   createSessionButton: document.querySelector("#create-session-button"),
   routeSessionInput: document.querySelector("#route-session-input"),
   routeSessionButton: document.querySelector("#route-session-button"),
+  createRuntimeSessionButton: document.querySelector("#create-runtime-session-button"),
+  runtimeSessionInput: document.querySelector("#runtime-session-input"),
+  runtimeEchoButton: document.querySelector("#runtime-echo-button"),
   resetButton: document.querySelector("#reset-button"),
 };
 
@@ -49,6 +55,22 @@ function wireEvents() {
     await postJson("/api/reset", {});
     await refreshState();
   });
+
+  elements.createRuntimeSessionButton.addEventListener("click", async () => {
+    await postJson("/api/runtime/sessions", {});
+    await refreshState();
+  });
+
+  elements.runtimeEchoButton.addEventListener("click", async () => {
+    const sessionId = elements.runtimeSessionInput.value.trim();
+    if (!sessionId) {
+      alert("Enter a runtime session id first.");
+      return;
+    }
+
+    await postJson("/api/runtime/echo", { sessionId });
+    await refreshState();
+  });
 }
 
 async function refreshState() {
@@ -72,6 +94,7 @@ function render() {
   renderSummary(snapshot.summary);
   renderInstances(snapshot.instances, snapshot.loadThreshold);
   renderSessions(snapshot.sessions);
+  renderRuntime(snapshot.runtime);
   renderEvents(snapshot.events);
 }
 
@@ -240,6 +263,71 @@ function renderEvents(events) {
           <p>${escapeHtml(event.summary)}</p>
           <p>${escapeHtml(new Date(event.timestamp).toLocaleString())}</p>
           <ol>${event.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderRuntime(runtime) {
+  const summaryCards = [
+    { label: "Gateway instances", value: runtime.instances.length },
+    { label: "Gateway sessions", value: runtime.sessions.length },
+    { label: "Latest runtime session", value: runtime.latestSessionId ?? "none" },
+  ];
+
+  elements.runtimeSummary.innerHTML = summaryCards
+    .map(
+      (card) => `
+        <article class="summary-card">
+          <strong>${escapeHtml(String(card.value))}</strong>
+          <span>${escapeHtml(card.label)}</span>
+        </article>
+      `,
+    )
+    .join("");
+
+  if (runtime.sessions.length === 0) {
+    elements.runtimeSessionTable.innerHTML = `<p>${escapeHtml(runtime.body)}</p>`;
+  } else {
+    elements.runtimeSessionTable.innerHTML = `
+      <div class="session-table">
+        ${runtime.sessions
+          .map(
+            (session) => `
+              <article class="session-row">
+                <div>
+                  <strong class="mono">${escapeHtml(session.sessionId)}</strong>
+                  <p>Assigned by the real in-process gateway controller</p>
+                </div>
+                <div>
+                  <strong class="mono">${escapeHtml(session.serverInstanceId)}</strong>
+                  <p>Sticky target for runtime transport flow</p>
+                </div>
+                <button class="button" data-runtime-session="${escapeHtml(session.sessionId)}">Runtime echo</button>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    `;
+
+    for (const button of elements.runtimeSessionTable.querySelectorAll("[data-runtime-session]")) {
+      button.addEventListener("click", async () => {
+        const sessionId = button.getAttribute("data-runtime-session");
+        await postJson("/api/runtime/echo", { sessionId });
+        await refreshState();
+      });
+    }
+  }
+
+  elements.runtimeEventLog.innerHTML = runtime.events
+    .map(
+      (event) => `
+        <article class="event-item">
+          <h3>${escapeHtml(event.title)}</h3>
+          <p>${escapeHtml(event.summary)}</p>
+          <p>${escapeHtml(new Date(event.timestamp).toLocaleString())}</p>
         </article>
       `,
     )

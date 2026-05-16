@@ -56,6 +56,7 @@ test("dashboard handler serves the UI shell and live state", async () => {
   const state = JSON.parse(stateResponse.body);
   assert.equal(state.dashboard.title, "MCP Scaling Demo Dashboard");
   assert.equal(state.instances.length, 3);
+  assert.equal(state.runtime.instances.length, 3);
   assert.match(state.dashboard.status.implemented, /HTTP\/SSE gateway/);
   assert.match(state.dashboard.status.planned, /durable session state/);
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("mcp-application-server.js")));
@@ -74,6 +75,32 @@ test("local demo controller exposes the reusable-core milestone copy", () => {
   assert.ok(
     state.dashboard.codeAdded.some((item) => item.includes("stdio transport adapter")),
   );
+});
+
+test("dashboard handler can create and use a real in-process runtime session", async () => {
+  const handler = createDashboardHandler();
+
+  const createdResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/sessions",
+    body: {},
+  });
+  assert.equal(createdResponse.statusCode, 200);
+  const created = JSON.parse(createdResponse.body);
+  assert.ok(created.result.sessionId);
+  assert.equal(created.state.runtime.sessions.length, 1);
+
+  const echoedResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/echo",
+    body: {
+      sessionId: created.result.sessionId,
+    },
+  });
+  assert.equal(echoedResponse.statusCode, 200);
+  const echoed = JSON.parse(echoedResponse.body);
+  assert.equal(echoed.result.reusedExistingSession, true);
+  assert.ok(echoed.state.runtime.events.length >= 1);
 });
 
 async function invokeHandler(handler, { method, url, headers = {}, body }) {

@@ -88,6 +88,23 @@
 
         <section class="panel panel-wide">
           <div class="panel-header">
+            <h2>Real HTTP/SSE gateway preview</h2>
+            <p>In-process gateway state shown without leaving the dashboard.</p>
+          </div>
+          <div class="controls">
+            <button id="create-runtime-session-button" class="button button-primary">Create runtime session</button>
+            <div class="inline-form">
+              <input id="runtime-session-input" placeholder="Runtime session id" />
+              <button id="runtime-echo-button" class="button">Send runtime echo</button>
+            </div>
+          </div>
+          <div id="runtime-summary" class="summary-strip"></div>
+          <div id="runtime-session-table"></div>
+          <div id="runtime-event-log" class="event-log"></div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
             <h2>Routing decisions</h2>
             <p>Every decision is shown step by step.</p>
           </div>

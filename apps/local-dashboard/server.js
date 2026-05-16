@@ -63,6 +63,16 @@ export function createDashboardHandler({ controller = new LocalDemoController() 
         return writeJson(response, 200, controller.routeSession(body.sessionId));
       }
 
+      if (request.method === "POST" && url.pathname === "/api/runtime/sessions") {
+        const body = await readJsonBody(request);
+        return writeJson(response, 200, await controller.createRuntimeSession(body.clientId));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/runtime/echo") {
+        const body = await readJsonBody(request);
+        return writeJson(response, 200, await controller.echoRuntimeSession(body.sessionId, body.message));
+      }
+
       if (request.method === "PATCH" && url.pathname.startsWith("/api/instances/")) {
         const serverInstanceId = decodeURIComponent(url.pathname.replace("/api/instances/", ""));
         const body = await readJsonBody(request);
