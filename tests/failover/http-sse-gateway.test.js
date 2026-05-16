@@ -1,30 +1,41 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createHttpSseGatewayServer } from "../../packages/transports/http-sse/gateway-server.js";
+import {
+  createGatewayHttpHandler,
+  createHttpSseGatewayController,
+} from "../../packages/transports/http-sse/gateway-server.js";
+import {
+  invokeHttpHandler,
+  parseJsonBody,
+  parseSseEvents,
+} from "../helpers/http-handler-harness.js";
 
-test("HTTP/SSE gateway keeps a session sticky and exposes SSE events", async (t) => {
-  const gateway = createHttpSseGatewayServer({
+test("HTTP/SSE gateway keeps a session sticky and exposes SSE events", async () => {
+  const controller = createHttpSseGatewayController({
     serverInstances: [
       { serverInstanceId: "server-a", load: 0.1 },
       { serverInstanceId: "server-b", load: 0.2 },
     ],
   });
+  const handler = createGatewayHttpHandler({ controller });
 
-  const address = await gateway.listen(0);
-  t.after(async () => {
-    await gateway.close();
-  });
-
-  const initialized = await sendHttpMessage(address.port, {
+  const initialized = await sendHttpMessage(handler, {
     method: "initialize",
     params: { clientId: "sse-test" },
   });
 
-  const eventCollector = createSseCollector(address.port, initialized.sessionId);
-  await eventCollector.waitForEvent("connected");
+  const eventStream = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: `/events?sessionId=${encodeURIComponent(initialized.sessionId)}`,
+    headers: { host: "127.0.0.1:3000", accept: "text/event-stream" },
+  });
+  assert.equal(eventStream.statusCode, 200);
+  assert.equal(eventStream.headers["Content-Type"], "text/event-stream");
+  const initialEvents = parseSseEvents(eventStream.body);
+  assert.equal(initialEvents[0].event, "connected");
 
-  const echoed = await sendHttpMessage(address.port, {
+  const echoed = await sendHttpMessage(handler, {
     method: "echo",
     sessionId: initialized.sessionId,
     params: { message: "sticky session" },
@@ -34,43 +45,39 @@ test("HTTP/SSE gateway keeps a session sticky and exposes SSE events", async (t)
   assert.equal(echoed.serverInstanceId, "server-a");
   assert.equal(echoed.reusedExistingSession, true);
 
-  const requestEvent = await eventCollector.waitForEvent("request.received");
-  const responseEvent = await eventCollector.waitForEvent("response.ready");
-  const routeEvent = await eventCollector.waitForEvent("route.selected");
+  const allEvents = parseSseEvents(eventStream.body);
+  const requestEvent = allEvents.find((event) => event.event === "request.received").data;
+  const responseEvent = allEvents.find((event) => event.event === "response.ready").data;
+  const routeEvent = allEvents.find((event) => event.event === "route.selected").data;
 
   assert.equal(requestEvent.payload.message, "sticky session");
   assert.equal(responseEvent.payload.requestCount, 1);
   assert.equal(routeEvent.serverInstanceId, "server-a");
-
-  eventCollector.close();
+  eventStream.close();
 });
 
-test("HTTP/SSE gateway reassigns the session when the original instance becomes unhealthy", async (t) => {
-  const gateway = createHttpSseGatewayServer({
+test("HTTP/SSE gateway reassigns the session when the original instance becomes unhealthy", async () => {
+  const controller = createHttpSseGatewayController({
     serverInstances: [
       { serverInstanceId: "server-a", load: 0.1, healthy: true },
       { serverInstanceId: "server-b", load: 0.2, healthy: true },
     ],
   });
+  const handler = createGatewayHttpHandler({ controller });
 
-  const address = await gateway.listen(0);
-  t.after(async () => {
-    await gateway.close();
-  });
-
-  const initialized = await sendHttpMessage(address.port, {
+  const initialized = await sendHttpMessage(handler, {
     method: "initialize",
     params: { clientId: "failover-test" },
   });
 
-  await sendInstanceUpdate(address.port, {
+  await sendInstanceUpdate(handler, {
     serverInstanceId: initialized.serverInstanceId,
     load: 0.9,
     healthy: false,
     acceptingNewSessions: false,
   });
 
-  const echoed = await sendHttpMessage(address.port, {
+  const echoed = await sendHttpMessage(handler, {
     method: "echo",
     sessionId: initialized.sessionId,
     params: { message: "reroute me" },
@@ -80,99 +87,26 @@ test("HTTP/SSE gateway reassigns the session when the original instance becomes 
   assert.equal(echoed.reusedExistingSession, false);
 });
 
-async function sendHttpMessage(port, body) {
-  const response = await fetch(`http://127.0.0.1:${port}/message`, {
+async function sendHttpMessage(handler, body) {
+  const response = await invokeHttpHandler(handler, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    url: "/message",
+    headers: { host: "127.0.0.1:3000" },
+    body,
   });
 
-  assert.equal(response.status, 200);
-  return response.json();
+  assert.equal(response.statusCode, 200);
+  return parseJsonBody(response);
 }
 
-async function sendInstanceUpdate(port, body) {
-  const response = await fetch(`http://127.0.0.1:${port}/instances`, {
+async function sendInstanceUpdate(handler, body) {
+  const response = await invokeHttpHandler(handler, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    url: "/instances",
+    headers: { host: "127.0.0.1:3000" },
+    body,
   });
 
-  assert.equal(response.status, 200);
-  return response.json();
-}
-
-function createSseCollector(port, sessionId) {
-  const controller = new AbortController();
-  const queue = [];
-  const waiters = [];
-
-  const promise = fetch(`http://127.0.0.1:${port}/events?sessionId=${encodeURIComponent(sessionId)}`, {
-    signal: controller.signal,
-    headers: { Accept: "text/event-stream" },
-  }).then(async (response) => {
-    assert.equal(response.status, 200);
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    for await (const chunk of response.body) {
-      buffer += decoder.decode(chunk, { stream: true });
-
-      while (buffer.includes("\n\n")) {
-        const boundary = buffer.indexOf("\n\n");
-        const rawEvent = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-
-        const parsed = parseSseEvent(rawEvent);
-        queue.push(parsed);
-        flushWaiters();
-      }
-    }
-  });
-
-  return {
-    close() {
-      controller.abort();
-      return promise.catch(() => {});
-    },
-    waitForEvent(name) {
-      const existing = queue.find((event) => event.event === name);
-      if (existing) {
-        return Promise.resolve(existing.data);
-      }
-
-      return new Promise((resolve) => {
-        waiters.push({ name, resolve });
-      });
-    },
-  };
-
-  function flushWaiters() {
-    for (let index = 0; index < waiters.length; index += 1) {
-      const waiter = waiters[index];
-      const matchIndex = queue.findIndex((event) => event.event === waiter.name);
-      if (matchIndex === -1) {
-        continue;
-      }
-
-      const [match] = queue.splice(matchIndex, 1);
-      waiters.splice(index, 1);
-      index -= 1;
-      waiter.resolve(match.data);
-    }
-  }
-}
-
-function parseSseEvent(rawEvent) {
-  const eventLine = rawEvent
-    .split("\n")
-    .find((line) => line.startsWith("event:"));
-  const dataLine = rawEvent
-    .split("\n")
-    .find((line) => line.startsWith("data:"));
-
-  return {
-    event: eventLine.slice("event:".length).trim(),
-    data: JSON.parse(dataLine.slice("data:".length).trim()),
-  };
+  assert.equal(response.statusCode, 200);
+  return parseJsonBody(response);
 }

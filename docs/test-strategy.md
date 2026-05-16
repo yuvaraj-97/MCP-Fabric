@@ -9,6 +9,17 @@ confirm the recent infrastructure improvements are actually taking effect.
 
 ## Test Layers
 
+## Command Matrix
+
+| Command | Opens sockets? | What it covers |
+| --- | --- | --- |
+| `npm test` | No | Core dispatch, stdio transport, controller parity, routing, dashboard, and in-process HTTP/SSE handler coverage |
+| `npm run test:unit` | No | Same as `npm test`; explicit alias for local unit/controller coverage |
+| `npm run test:integration` | No | Targeted HTTP/SSE parity and failover files, now exercised through the in-process HTTP handler seam |
+| `npm run demo` | Yes, local UI only | Beginner-friendly dashboard on port `4321` |
+| `npm run demo:http` | Yes | Single-instance HTTP/SSE inspector on port `3000` |
+| `npm run demo:multi` | Yes | Multi-instance gateway inspector on port `3001` |
+
 ### 1. Transport parity
 
 Purpose:

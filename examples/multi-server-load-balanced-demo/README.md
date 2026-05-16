@@ -6,7 +6,7 @@ server instances.
 Run:
 
 ```sh
-node examples/multi-server-load-balanced-demo/server.js
+npm run demo:multi
 ```
 
 Then open:
@@ -25,7 +25,7 @@ The inspector shows:
 Local load test:
 
 ```sh
-node examples/multi-server-load-balanced-demo/load-generator.js http://127.0.0.1:3001 25 100
+npm run demo:load:local
 ```
 
 Live-domain load test:

@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { createHttpSseGatewayServer } from "../../packages/transports/http-sse/gateway-server.js";
+import {
+  createGatewayHttpHandler,
+  createHttpSseGatewayController,
+} from "../../packages/transports/http-sse/gateway-server.js";
 import { startStdioServer } from "../../packages/transports/stdio/stdio-server.js";
+import { invokeHttpHandler, parseJsonBody } from "../helpers/http-handler-harness.js";
 
 test("stdio and HTTP/SSE expose the same initialize and echo behavior", async (t) => {
   const input = new PassThrough();
@@ -17,13 +21,10 @@ test("stdio and HTTP/SSE expose the same initialize and echo behavior", async (t
   });
   t.after(() => stdio.close());
 
-  const gateway = createHttpSseGatewayServer({
+  const controller = createHttpSseGatewayController({
     serverInstances: [{ serverInstanceId: "server-a", load: 0.1 }],
   });
-  const address = await gateway.listen(0);
-  t.after(async () => {
-    await gateway.close();
-  });
+  const handler = createGatewayHttpHandler({ controller });
 
   const stdioInitialize = await sendStdioMessage(stdio, {
     id: 1,
@@ -42,12 +43,12 @@ test("stdio and HTTP/SSE expose the same initialize and echo behavior", async (t
     output,
   });
 
-  const httpInitialize = await sendHttpMessage(address.port, {
+  const httpInitialize = await sendHttpMessage(handler, {
     method: "initialize",
     params: { clientId: "parity-client" },
   });
 
-  const httpEcho = await sendHttpMessage(address.port, {
+  const httpEcho = await sendHttpMessage(handler, {
     method: "echo",
     sessionId: httpInitialize.sessionId,
     params: { message: "hello parity" },
@@ -58,15 +59,16 @@ test("stdio and HTTP/SSE expose the same initialize and echo behavior", async (t
   assert.equal(stdioEcho.result.requestCount, httpEcho.result.requestCount);
 });
 
-async function sendHttpMessage(port, body) {
-  const response = await fetch(`http://127.0.0.1:${port}/message`, {
+async function sendHttpMessage(handler, body) {
+  const response = await invokeHttpHandler(handler, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    url: "/message",
+    headers: { host: "127.0.0.1:3000" },
+    body,
   });
 
-  assert.equal(response.status, 200);
-  return response.json();
+  assert.equal(response.statusCode, 200);
+  return parseJsonBody(response);
 }
 
 async function sendStdioMessage(server, payload) {

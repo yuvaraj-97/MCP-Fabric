@@ -5,7 +5,7 @@ Example MCP-compatible server running through the HTTP/SSE transport adapter.
 Run:
 
 ```sh
-node examples/http-sse-server/server.js
+npm run demo:http
 ```
 
 Then open:

@@ -139,23 +139,38 @@ Use Node.js 20 or newer.
 npm install
 ```
 
-Run the sandbox-safe local test suite with:
+Run the local test suite with:
 
 ```sh
 npm test
 ```
 
-Run the socket-bound HTTP/SSE integration suite when your environment allows
-local listeners:
+The same suite is also available as:
+
+```sh
+npm run test:unit
+```
+
+Targeted HTTP/SSE parity and failover tests can still be run separately with:
 
 ```sh
 npm run test:integration
 ```
 
+## Run Demos
+
+| Demo | Command | Port | Purpose |
+| --- | --- | --- | --- |
+| Local dashboard | `npm run demo` | `4321` | Beginner-friendly explanation of the project and routing behavior |
+| stdio example | `npm run demo:stdio` | none | Shared example server over stdio |
+| Single-instance HTTP/SSE inspector | `npm run demo:http` | `3000` | Inspect one gateway-backed HTTP/SSE server |
+| Multi-instance gateway demo | `npm run demo:multi` | `3001` | Inspect sticky routing and failover across multiple instances |
+| Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
+
 Run the local HTTP/SSE inspector with:
 
 ```sh
-node examples/http-sse-server/server.js
+npm run demo:http
 ```
 
 Run the multi-instance sticky-session inspector with:
@@ -241,7 +256,24 @@ It also lets you interactively:
 Run:
 
 ```sh
-node examples/http-sse-server/server.js
+npm run demo:http
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3000/inspector
+```
+
+Use this when you want to inspect real session stickiness, SSE event ordering,
+and gateway behavior rather than the higher-level local dashboard.
+
+## Multi-Server Gateway Demo
+
+Run:
+
+```sh
+npm run demo:multi
 ```
 
 Then open:
@@ -249,9 +281,6 @@ Then open:
 ```text
 http://127.0.0.1:3001/inspector
 ```
-
-Use this when you want to inspect real session stickiness, SSE event ordering,
-and gateway behavior rather than the higher-level local dashboard.
 
 ## Checks
 

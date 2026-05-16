@@ -18,10 +18,46 @@ export function createHttpSseGatewayServer({
     loadThreshold,
     sessionRegistry,
   });
+  const server = createServer(createGatewayHttpHandler({ controller }));
 
-  const server = createServer(async (request, response) => {
+  return {
+    server,
+    router: controller.router,
+    sessionRegistry: controller.sessionRegistry,
+    applications: controller.applications,
+    listen(port = 0) {
+      return new Promise((resolve) => {
+        server.listen(port, () => {
+          resolve(server.address());
+        });
+      });
+    },
+    close() {
+      return new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+export function createGatewayHttpHandler({
+  controller,
+  baseUrl = "http://127.0.0.1",
+} = {}) {
+  if (!controller) {
+    throw new TypeError("controller is required");
+  }
+
+  return async (request, response) => {
     try {
-      const url = new URL(request.url, `http://${request.headers.host}`);
+      const url = new URL(request.url, request.headers.host ? `http://${request.headers.host}` : baseUrl);
 
       if (request.method === "GET" && url.pathname === "/health") {
         return sendJson(response, 200, {
@@ -63,7 +99,7 @@ export function createHttpSseGatewayServer({
           route: controller.sessionRegistry.get(sessionId) ?? null,
         });
 
-        request.on("close", () => {
+        request.on?.("close", () => {
           controller.detachEventStream(sessionId, response);
         });
 
@@ -88,32 +124,6 @@ export function createHttpSseGatewayServer({
         error: cause instanceof Error ? cause.message : String(cause),
       });
     }
-  });
-
-  return {
-    server,
-    router: controller.router,
-    sessionRegistry: controller.sessionRegistry,
-    applications: controller.applications,
-    listen(port = 0) {
-      return new Promise((resolve) => {
-        server.listen(port, () => {
-          resolve(server.address());
-        });
-      });
-    },
-    close() {
-      return new Promise((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    },
   };
 }
 
