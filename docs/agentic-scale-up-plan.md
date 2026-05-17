@@ -162,9 +162,16 @@ Missing pieces:
   path
 - production-grade durable session registry backends beyond the local file-backed prototype
 - operator-friendly controls around TTL, reconnect grace windows, and restart policy defaults
+- simple operator configuration defaults (e.g., `servers=3, max_load=0.75`) for easier setup
 - health/load reporting model for real instances
 - more complete observability and operator workflows
 - packaged standalone gateway runtime
+
+## Advanced Future Enhancements
+
+- **Context / State Migration (Solving the "Hot Instance" problem):** Freezing an active MCP session state on an overloaded server and migrating it to an idle server mid-session. This would prevent load imbalance and save significant AI inference costs by avoiding context rebuilds.
+- **Memory Management (TTL & Sliding Window):** The infrastructure must enforce strict TTLs to clear abandoned sessions (preventing memory leaks), while the AI Client must implement a sliding window or auto-summarization to prevent active, long-running sessions from causing out-of-memory crashes.
+- **Deployment Alternatives (AWS ALB vs Custom Gateway):** Providing clear deployment guidance. Use AWS ALB or open-source proxies (like NGINX) for out-of-the-box sticky routing. Use the custom Node.js gateway (Option 2) when advanced programmatic control (like P2P migration) is required.
 
 ## Step-by-Step Implementation Plan
 
