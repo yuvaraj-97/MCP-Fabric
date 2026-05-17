@@ -1,4 +1,5 @@
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 
 import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-application-server.js";
 
@@ -67,6 +68,6 @@ function writeJsonLine(stream, payload) {
   stream.write(`${JSON.stringify(payload)}\n`);
 }
 
-if (import.meta.url === new URL(process.argv[1], "file://").href) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startStdioServer();
 }

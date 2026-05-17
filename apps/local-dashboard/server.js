@@ -155,7 +155,7 @@ function contentTypeFor(filePath) {
   return "text/plain; charset=utf-8";
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const dashboard = createDashboardServer();
   dashboard.start().then((address) => {
     const effectivePort = typeof address === "object" && address ? address.port : process.env.PORT || 4321;

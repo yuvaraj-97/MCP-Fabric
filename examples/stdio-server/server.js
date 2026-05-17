@@ -1,5 +1,6 @@
 import { createScalingDemoServer } from "../shared/scaling-demo-server.js";
 import { StdioTransportAdapter } from "../../packages/transports/stdio/stdio-transport.js";
+import { fileURLToPath } from "node:url";
 
 export function createStdioDemo() {
   const server = createScalingDemoServer();
@@ -13,7 +14,7 @@ export function createStdioDemo() {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const demo = createStdioDemo();
   demo.transport.start();
 }
