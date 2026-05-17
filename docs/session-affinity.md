@@ -36,7 +36,7 @@ MCP Server Instance
 | New session | Assign to a healthy, least-loaded server instance. |
 | Existing session | Route to the registered server instance when available. |
 | Missing mapping | Create a new mapping or require reinitialization. |
-| Unhealthy instance | Reconnect, reinitialize, or restore from external state. |
+| Unhealthy instance | Reassign and rehydrate, reconnect, or restore from external state. |
 
 ## Registry Requirements
 
@@ -48,5 +48,7 @@ The registry should support:
 - marking server instances unhealthy
 - surviving gateway restarts when backed by durable storage
 
-For the first prototype, an in-memory registry is enough. The gateway restart
-scenario should be captured as a later milestone.
+The repo now includes a durable file-backed registry for local restart and
+reconnect behavior, plus explicit session TTL and reconnect grace-window
+metadata. Production deployments can later swap that for a stronger shared
+state backend and operator-managed policy defaults.

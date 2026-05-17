@@ -160,8 +160,8 @@ Missing pieces:
 - one fully shared application boundary used consistently by every transport
 - cleaner unification between the reusable MCP core and the newer demo/gateway
   path
-- explicit reconnect and failure policies
-- durable session registry strategy
+- production-grade durable session registry backends beyond the local file-backed prototype
+- operator-friendly controls around TTL, reconnect grace windows, and restart policy defaults
 - health/load reporting model for real instances
 - more complete observability and operator workflows
 - packaged standalone gateway runtime
@@ -245,6 +245,18 @@ Deliverables:
 - durable session registry plan or first implementation
 - failure scenario tests
 
+Status:
+
+- complete for the prototype layer:
+  - durable file-backed registry
+  - explicit restart reconnect behavior
+  - session TTL enforcement
+  - reconnect grace-window enforcement
+- next step for production hardening:
+  - external state backends
+  - configurable operator policy
+  - clearer reconnect semantics across distributed runtimes
+
 ## Testing Strategy
 
 Testing should grow with the architecture.
@@ -256,13 +268,12 @@ Testing should grow with the architecture.
 - unit tests for load-aware routing behavior
 - tests for stdio transport framing
 - tests for demo-application parity
-- unit tests for session registry behavior
-- unit tests for load-aware routing behavior
 - tests for overloaded instance handling
 - tests for unhealthy instance reassignment
 - tests for existing-session stickiness
 - dashboard smoke test for local UI and API startup
-- socket-bound HTTP/SSE integration tests for real transport wiring
+- tests for durable registry persistence across process restarts
+- tests for explicit reconnect and recovery actions
 
 ### Next stages
 
@@ -302,6 +313,66 @@ through a local visual dashboard.
 - show real gateway wiring
 - show reconnect/failure behavior
 - show durable session handling when available
+
+## Future Validation Plan
+
+The next serious proof step should move beyond the local in-process demo and
+test the thesis in a more realistic deployment shape.
+
+### Goal
+
+Prove that this repo can act as the communication and session-management layer
+around a real MCP-compatible workload without changing MCP semantics.
+
+### Proposed setup
+
+- run the gateway in one container or VM
+- run one or more MCP server instances in separate containers or VMs
+- run the MCP client from another machine or container
+- use HTTP/SSE or the closest deployable transport boundary as the shared path
+- persist session state outside process memory
+
+### Best validation target
+
+Use one open-source MCP server as the first real integration target.
+
+That gives the project a better proof than a toy demo because it tests:
+
+- whether the reusable core and gateway assumptions fit real MCP traffic
+- whether sticky session routing still works with real tools and state
+- whether reconnect and restart policy are understandable in practice
+- whether the gateway remains an infrastructure layer instead of becoming a
+  protocol fork
+
+### Suggested execution order
+
+1. Pick a small open-source MCP server that already works over a supported
+   local transport.
+2. Wrap or front it with this repo's transport/gateway path instead of changing
+   the server business logic.
+3. Run client, gateway, and server on separate containers or hosts.
+4. Verify new-session assignment, sticky follow-up routing, overload avoidance,
+   unhealthy-instance reassignment, restart recovery, TTL expiry, and reconnect
+   grace behavior.
+5. Capture operator-facing logs and dashboard output to confirm the thesis is
+   understandable, not just technically functional.
+
+### Success criteria
+
+- the MCP server behavior still works through the gateway path
+- the same client session returns to the same healthy server
+- new sessions avoid overloaded servers
+- unhealthy servers stop receiving sticky traffic
+- durable restart and reconnect behavior remain explicit
+- expired sessions are rejected clearly instead of silently reviving stale state
+
+### Why this matters
+
+This is the step that turns the current prototype from an architecture proof
+into a real deployment argument.
+
+If this works with an open-source MCP server across separate machines or
+containers, the repo’s thesis becomes much more credible.
 
 ## Risks And Assumptions
 

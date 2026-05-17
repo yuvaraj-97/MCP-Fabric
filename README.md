@@ -104,17 +104,18 @@ The implemented slices today are:
 - basic `stdio` adapter with framed JSON-RPC message handling
 - newline-delimited local `stdio` harness for transport parity checks
 - shared example server proving one tool set can run through the core
-- in-memory session registry
+- in-memory and file-backed session registries
 - load-aware router
-- HTTP/SSE gateway with session stickiness and SSE event visibility
+- HTTP/SSE gateway with session stickiness, explicit reconnect/recovery actions,
+  session TTL and reconnect grace-window enforcement, and SSE event visibility
 - self-explaining local dashboard for routing behavior
 - automated tests for core dispatch, `stdio` transport behavior, stickiness,
   HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
-  visibility, failover, and dashboard startup
+  visibility, durable restart/reconnect behavior, failover, and dashboard
+  startup
 
-Durable session handling, cleaner unification of the shared application
-boundary, and fuller gateway packaging are still the next recommended build
-steps.
+External production-grade state backends, operator-friendly policy controls, and
+fuller gateway packaging are still the next recommended build steps.
 
 ## Recommended Path
 
@@ -175,6 +176,8 @@ This is the main beginner-friendly entrypoint. It now shows both:
 
 - the explainer routing demo
 - a real in-process HTTP/SSE gateway view
+- a durable runtime session registry that can survive an in-process restart
+- explicit session TTL and reconnect grace-window behavior
 
 Use the other demos when you want a narrower transport-specific deep dive.
 
@@ -239,6 +242,8 @@ It also lets you interactively:
 - inspect routing decisions step by step
 - create a real in-process HTTP/SSE gateway session
 - send runtime echoes through that real gateway path
+- restart the runtime gateway and reconnect an existing durable session
+- simulate a disconnect, reconnect within grace, and see the gateway explain the decision
 - inspect richer live runtime SSE event payloads from inside the same dashboard
 
 ## HTTP/SSE Inspector

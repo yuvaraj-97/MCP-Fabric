@@ -15,6 +15,7 @@ const elements = {
   instanceGrid: document.querySelector("#instance-grid"),
   sessionTable: document.querySelector("#session-table"),
   runtimeSummary: document.querySelector("#runtime-summary"),
+  runtimePolicyCopy: document.querySelector("#runtime-policy-copy"),
   runtimeSessionTable: document.querySelector("#runtime-session-table"),
   runtimeEventLog: document.querySelector("#runtime-event-log"),
   eventLog: document.querySelector("#event-log"),
@@ -24,6 +25,8 @@ const elements = {
   createRuntimeSessionButton: document.querySelector("#create-runtime-session-button"),
   runtimeSessionInput: document.querySelector("#runtime-session-input"),
   runtimeEchoButton: document.querySelector("#runtime-echo-button"),
+  runtimeDisconnectButton: document.querySelector("#runtime-disconnect-button"),
+  restartRuntimeButton: document.querySelector("#restart-runtime-button"),
   resetButton: document.querySelector("#reset-button"),
 };
 
@@ -36,8 +39,7 @@ async function boot() {
 
 function wireEvents() {
   elements.createSessionButton.addEventListener("click", async () => {
-    await postJson("/api/sessions", {});
-    await refreshState();
+    await runAction(() => postJson("/api/sessions", {}));
   });
 
   elements.routeSessionButton.addEventListener("click", async () => {
@@ -47,18 +49,15 @@ function wireEvents() {
       return;
     }
 
-    await postJson("/api/route", { sessionId });
-    await refreshState();
+    await runAction(() => postJson("/api/route", { sessionId }));
   });
 
   elements.resetButton.addEventListener("click", async () => {
-    await postJson("/api/reset", {});
-    await refreshState();
+    await runAction(() => postJson("/api/reset", {}));
   });
 
   elements.createRuntimeSessionButton.addEventListener("click", async () => {
-    await postJson("/api/runtime/sessions", {});
-    await refreshState();
+    await runAction(() => postJson("/api/runtime/sessions", {}));
   });
 
   elements.runtimeEchoButton.addEventListener("click", async () => {
@@ -68,8 +67,21 @@ function wireEvents() {
       return;
     }
 
-    await postJson("/api/runtime/echo", { sessionId });
-    await refreshState();
+    await runAction(() => postJson("/api/runtime/echo", { sessionId }));
+  });
+
+  elements.runtimeDisconnectButton.addEventListener("click", async () => {
+    const sessionId = elements.runtimeSessionInput.value.trim();
+    if (!sessionId) {
+      alert("Enter a runtime session id first.");
+      return;
+    }
+
+    await runAction(() => postJson("/api/runtime/disconnect", { sessionId }));
+  });
+
+  elements.restartRuntimeButton.addEventListener("click", async () => {
+    await runAction(() => postJson("/api/runtime/restart", {}));
   });
 }
 
@@ -270,10 +282,15 @@ function renderEvents(events) {
 }
 
 function renderRuntime(runtime) {
+  elements.runtimePolicyCopy.textContent = runtime.policy;
   const summaryCards = [
     { label: "Gateway instances", value: runtime.instances.length },
     { label: "Gateway sessions", value: runtime.sessions.length },
     { label: "Latest runtime session", value: runtime.latestSessionId ?? "none" },
+    { label: "Registry mode", value: runtime.registry.mode },
+    { label: "Durable", value: runtime.registry.durable ? "yes" : "no" },
+    { label: "Session TTL", value: formatDuration(runtime.registry.sessionTtlMs) },
+    { label: "Reconnect grace", value: formatDuration(runtime.registry.reconnectGracePeriodMs) },
   ];
 
   elements.runtimeSummary.innerHTML = summaryCards
@@ -304,6 +321,11 @@ function renderRuntime(runtime) {
                   <strong class="mono">${escapeHtml(session.serverInstanceId)}</strong>
                   <p>Sticky target for runtime transport flow</p>
                 </div>
+                <div>
+                  <p>state=${escapeHtml(session.metadata.connectionState ?? "active")}</p>
+                  <p>ttl=${escapeHtml(formatDurationRemaining(session.metadata.expiresAt))}</p>
+                  <p>grace=${escapeHtml(formatTimestamp(session.metadata.graceUntil))}</p>
+                </div>
                 <button class="button" data-runtime-session="${escapeHtml(session.sessionId)}">Runtime echo</button>
               </article>
             `,
@@ -315,8 +337,7 @@ function renderRuntime(runtime) {
     for (const button of elements.runtimeSessionTable.querySelectorAll("[data-runtime-session]")) {
       button.addEventListener("click", async () => {
         const sessionId = button.getAttribute("data-runtime-session");
-        await postJson("/api/runtime/echo", { sessionId });
-        await refreshState();
+        await runAction(() => postJson("/api/runtime/echo", { sessionId }));
       });
     }
   }
@@ -340,12 +361,13 @@ function renderRuntime(runtime) {
 }
 
 async function patchInstance(serverInstanceId, body) {
-  await fetchJson(`/api/instances/${encodeURIComponent(serverInstanceId)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  await refreshState();
+  await runAction(() =>
+    fetchJson(`/api/instances/${encodeURIComponent(serverInstanceId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 async function postJson(url, body) {
@@ -364,6 +386,45 @@ async function fetchJson(url, options) {
   }
 
   return payload;
+}
+
+async function runAction(action) {
+  try {
+    await action();
+    await refreshState();
+  } catch (error) {
+    alert(error.message || "Request failed");
+    await refreshState();
+  }
+}
+
+function formatDuration(durationMs) {
+  if (typeof durationMs !== "number" || Number.isNaN(durationMs)) {
+    return "unknown";
+  }
+
+  if (durationMs % 1000 === 0) {
+    return `${durationMs / 1000}s`;
+  }
+
+  return `${durationMs}ms`;
+}
+
+function formatDurationRemaining(timestamp) {
+  if (typeof timestamp !== "number") {
+    return "none";
+  }
+
+  const remainingMs = Math.max(0, timestamp - Date.now());
+  return formatDuration(remainingMs);
+}
+
+function formatTimestamp(timestamp) {
+  if (typeof timestamp !== "number") {
+    return "none";
+  }
+
+  return new Date(timestamp).toLocaleTimeString();
 }
 
 function escapeHtml(value) {

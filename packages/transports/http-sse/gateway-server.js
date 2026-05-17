@@ -11,12 +11,18 @@ export function createHttpSseGatewayServer({
     { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
   ],
   loadThreshold = 0.7,
-  sessionRegistry = new MemorySessionRegistry(),
+  sessionRegistry,
+  sessionTtlMs = 5 * 60 * 1000,
+  reconnectGracePeriodMs = 30 * 1000,
+  now = () => Date.now(),
 } = {}) {
   const controller = createHttpSseGatewayController({
     serverInstances,
     loadThreshold,
     sessionRegistry,
+    sessionTtlMs,
+    reconnectGracePeriodMs,
+    now,
   });
   const server = createServer(createGatewayHttpHandler({ controller }));
 
@@ -86,6 +92,8 @@ export function createGatewayHttpHandler({
           return sendJson(response, 400, { error: "sessionId is required" });
         }
 
+        const route = controller.attachEventStream(sessionId, response);
+
         response.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache, no-transform",
@@ -93,10 +101,9 @@ export function createGatewayHttpHandler({
           "Access-Control-Allow-Origin": "*",
         });
 
-        controller.attachEventStream(sessionId, response);
         writeSse(response, "connected", {
           sessionId,
-          route: controller.sessionRegistry.get(sessionId) ?? null,
+          route,
         });
 
         request.on?.("close", () => {
@@ -120,8 +127,10 @@ export function createGatewayHttpHandler({
 
       sendJson(response, 404, { error: "Not found" });
     } catch (cause) {
-      sendJson(response, 500, {
+      sendJson(response, cause?.statusCode ?? 500, {
         error: cause instanceof Error ? cause.message : String(cause),
+        code: cause?.code,
+        sessionId: cause?.sessionId,
       });
     }
   };
@@ -133,9 +142,13 @@ export function createHttpSseGatewayController({
     { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
   ],
   loadThreshold = 0.7,
-  sessionRegistry = new MemorySessionRegistry(),
+  sessionRegistry,
+  sessionTtlMs = 5 * 60 * 1000,
+  reconnectGracePeriodMs = 30 * 1000,
+  now = () => Date.now(),
 } = {}) {
-  const router = new LoadRouter({ sessionRegistry, loadThreshold });
+  const resolvedSessionRegistry = sessionRegistry ?? new MemorySessionRegistry({ now });
+  const router = new LoadRouter({ sessionRegistry: resolvedSessionRegistry, loadThreshold });
   const applications = new Map();
   const eventStreams = new Map();
 
@@ -149,8 +162,26 @@ export function createHttpSseGatewayController({
 
   return {
     router,
-    sessionRegistry,
+    sessionRegistry: resolvedSessionRegistry,
     applications,
+    describeRegistry() {
+      return {
+        mode:
+          typeof resolvedSessionRegistry.storageKind === "function"
+            ? resolvedSessionRegistry.storageKind()
+            : "custom",
+        durable:
+          typeof resolvedSessionRegistry.isDurable === "function"
+            ? resolvedSessionRegistry.isDurable()
+            : false,
+        sessionTtlMs,
+        reconnectGracePeriodMs,
+        filePath:
+          typeof resolvedSessionRegistry.filePath === "function"
+            ? resolvedSessionRegistry.filePath()
+            : undefined,
+      };
+    },
     upsertInstance(instance) {
       const updated = router.upsertInstance(instance);
       if (!applications.has(updated.serverInstanceId)) {
@@ -163,17 +194,71 @@ export function createHttpSseGatewayController({
       return updated;
     },
     attachEventStream(sessionId, response) {
+      const record = resolvedSessionRegistry.get(sessionId);
+      if (!record) {
+        addEventStream(eventStreams, sessionId, response);
+        return null;
+      }
+
+      const reconnectState = deriveReconnectState(record, now());
+      if (reconnectState === "grace-expired") {
+        resolvedSessionRegistry.delete(sessionId);
+        throw createGatewaySessionError({
+          sessionId,
+          code: "reconnect-grace-expired",
+          statusCode: 410,
+          message: "Reconnect grace period expired. Reinitialize the MCP session.",
+        });
+      }
+
       addEventStream(eventStreams, sessionId, response);
+      return record;
     },
     detachEventStream(sessionId, response) {
       removeEventStream(eventStreams, sessionId, response);
+      if (!hasActiveEventStream(eventStreams, sessionId)) {
+        resolvedSessionRegistry.markDisconnected?.(sessionId, {
+          gracePeriodMs: reconnectGracePeriodMs,
+        });
+      }
     },
     async handleGatewayMessage(body) {
+      resolvedSessionRegistry.pruneExpired?.();
       const method = body.method;
       const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
-      const existingSessionRecord = sessionId ? sessionRegistry.get(sessionId) : undefined;
+      const existingSessionRecord = sessionId ? resolvedSessionRegistry.get(sessionId) : undefined;
+      const requestNow = now();
+
+      if (method !== "initialize" && !existingSessionRecord) {
+        throw createGatewaySessionError({
+          sessionId,
+          code: "session-not-found",
+          statusCode: 410,
+          message: "Session was not found or has expired. Reinitialize the MCP session.",
+        });
+      }
+
+      const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
+      if (method !== "initialize" && reconnectState === "grace-expired") {
+        resolvedSessionRegistry.delete(sessionId);
+        throw createGatewaySessionError({
+          sessionId,
+          code: "reconnect-grace-expired",
+          statusCode: 410,
+          message: "Reconnect grace period expired. Reinitialize the MCP session.",
+        });
+      }
+
       const route = router.routeSession(sessionId);
       const application = applications.get(route.serverInstanceId);
+      let recoveryAction = determineRecoveryAction({
+        method,
+        route,
+        existingSessionRecord,
+        application,
+        sessionId,
+        reconnectState,
+      });
 
       if (method !== "initialize" && !application.getSessionState(sessionId)) {
         const rehydrated = await application.handleMessage(
@@ -191,9 +276,22 @@ export function createHttpSseGatewayController({
             route,
             reusedExistingSession: false,
             eventStreams,
-          }),
+            }),
         );
         assertGatewayResult(rehydrated);
+        recoveryAction = route.reusedExistingSession
+          ? reconnectState === "within-grace"
+            ? "reconnected-from-registry-within-grace"
+            : "reconnected-from-registry"
+          : reconnectState === "within-grace"
+            ? "reassigned-and-rehydrated-within-grace"
+            : "reassigned-and-rehydrated";
+        publishEvent(eventStreams, sessionId, "session.rehydrated", {
+          sessionId,
+          serverInstanceId: route.serverInstanceId,
+          clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+          observedAt: new Date().toISOString(),
+        });
       }
 
       const envelope = await application.handleMessage(
@@ -212,12 +310,16 @@ export function createHttpSseGatewayController({
         }),
       );
       const result = assertGatewayResult(envelope);
-
-      if (method === "initialize") {
-        sessionRegistry.assign(sessionId, route.serverInstanceId, {
-          clientId: body.params?.clientId ?? "anonymous-client",
-        });
-      }
+      resolvedSessionRegistry.assign(
+        sessionId,
+        route.serverInstanceId,
+        buildLifecycleMetadata({
+          existingRecord: existingSessionRecord,
+          clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
+          now: requestNow,
+          sessionTtlMs,
+        }),
+      );
 
       publishEvent(eventStreams, sessionId, "route.selected", {
         sessionId,
@@ -230,6 +332,11 @@ export function createHttpSseGatewayController({
         sessionId,
         serverInstanceId: route.serverInstanceId,
         reusedExistingSession: route.reusedExistingSession,
+        recovery: {
+          action: recoveryAction,
+          registry: this.describeRegistry(),
+          registryRecordFound: Boolean(existingSessionRecord),
+        },
         result,
       };
     },
@@ -237,6 +344,41 @@ export function createHttpSseGatewayController({
       return Array.from(eventStreams.get(sessionId) ?? []);
     },
   };
+}
+
+function determineRecoveryAction({
+  method,
+  route,
+  existingSessionRecord,
+  application,
+  sessionId,
+  reconnectState,
+}) {
+  if (method === "initialize") {
+    return existingSessionRecord ? "reinitialized-existing-session" : "new-session";
+  }
+
+  if (reconnectState === "within-grace") {
+    if (!application.getSessionState(sessionId) && existingSessionRecord) {
+      return "reconnected-from-registry-within-grace";
+    }
+
+    return "reconnected-within-grace-period";
+  }
+
+  if (!application.getSessionState(sessionId) && existingSessionRecord) {
+    return "reconnected-from-registry";
+  }
+
+  if (route.reusedExistingSession) {
+    return "sticky-existing-session";
+  }
+
+  if (existingSessionRecord) {
+    return "reassigned-after-instance-change";
+  }
+
+  return "new-session";
 }
 
 function createGatewayContext({ sessionId, route, reusedExistingSession, eventStreams }) {
@@ -309,6 +451,10 @@ function removeEventStream(eventStreams, sessionId, response) {
   }
 }
 
+function hasActiveEventStream(eventStreams, sessionId) {
+  return Boolean(eventStreams.get(sessionId)?.size);
+}
+
 function publishEvent(eventStreams, sessionId, event, payload) {
   const clients = eventStreams.get(sessionId);
   if (!clients) {
@@ -323,6 +469,44 @@ function publishEvent(eventStreams, sessionId, event, payload) {
 function writeSse(response, event, payload) {
   response.write(`event: ${event}\n`);
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function deriveReconnectState(existingSessionRecord, requestNow) {
+  if (existingSessionRecord?.metadata?.connectionState !== "disconnected") {
+    return "active";
+  }
+
+  if (
+    typeof existingSessionRecord.metadata.graceUntil === "number" &&
+    existingSessionRecord.metadata.graceUntil >= requestNow
+  ) {
+    return "within-grace";
+  }
+
+  return "grace-expired";
+}
+
+function buildLifecycleMetadata({ existingRecord, clientId, now, sessionTtlMs }) {
+  return {
+    clientId,
+    connectionState: "active",
+    disconnectedAt: null,
+    graceUntil: null,
+    lastSeenAt: now,
+    expiresAt: now + sessionTtlMs,
+    reconnectCount:
+      existingRecord?.metadata?.connectionState === "disconnected"
+        ? (existingRecord?.metadata?.reconnectCount ?? 0) + 1
+        : (existingRecord?.metadata?.reconnectCount ?? 0),
+  };
+}
+
+function createGatewaySessionError({ sessionId, code, statusCode, message }) {
+  const error = new Error(message);
+  error.sessionId = sessionId;
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
 }
 
 function renderInspectorHtml() {

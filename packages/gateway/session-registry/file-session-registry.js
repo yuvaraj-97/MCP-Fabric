@@ -1,17 +1,35 @@
-export class MemorySessionRegistry {
+import { dirname } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+
+export class FileSessionRegistry {
+  #filePath;
   #now;
   #sessions = new Map();
 
-  constructor({ now = () => Date.now() } = {}) {
+  constructor({ filePath, now = () => Date.now() } = {}) {
+    assertNonEmptyString(filePath, "filePath");
+    this.#filePath = filePath;
     this.#now = now;
+    this.#loadFromDisk();
   }
 
   storageKind() {
-    return "memory";
+    return "file";
   }
 
   isDurable() {
-    return false;
+    return true;
+  }
+
+  filePath() {
+    return this.#filePath;
   }
 
   assign(sessionId, serverInstanceId, metadata = {}) {
@@ -29,28 +47,22 @@ export class MemorySessionRegistry {
     };
 
     this.#sessions.set(sessionId, record);
-    return { ...record, metadata: { ...record.metadata } };
+    this.#persist();
+    return cloneRecord(record);
   }
 
   get(sessionId) {
     assertNonEmptyString(sessionId, "sessionId");
-
+    this.pruneExpired();
     const record = this.#sessions.get(sessionId);
-    if (!record) {
-      return undefined;
-    }
-
-     if (isExpiredRecord(record, this.#now())) {
-      this.#sessions.delete(sessionId);
-      return undefined;
-    }
-
-    return { ...record, metadata: { ...record.metadata } };
+    return record ? cloneRecord(record) : undefined;
   }
 
   delete(sessionId) {
     assertNonEmptyString(sessionId, "sessionId");
-    return this.#sessions.delete(sessionId);
+    const deleted = this.#sessions.delete(sessionId);
+    this.#persist();
+    return deleted;
   }
 
   deleteByServer(serverInstanceId) {
@@ -64,15 +76,13 @@ export class MemorySessionRegistry {
       }
     }
 
+    this.#persist();
     return deleted;
   }
 
   list() {
     this.pruneExpired();
-    return Array.from(this.#sessions.values(), (record) => ({
-      ...record,
-      metadata: { ...record.metadata },
-    }));
+    return Array.from(this.#sessions.values(), cloneRecord);
   }
 
   markDisconnected(sessionId, { gracePeriodMs = 0 } = {}) {
@@ -125,12 +135,71 @@ export class MemorySessionRegistry {
       }
     }
 
+    if (deleted > 0) {
+      this.#persist();
+    }
+
     return deleted;
   }
 
   clear() {
     this.#sessions.clear();
+    this.#persist();
   }
+
+  #loadFromDisk() {
+    if (!existsSync(this.#filePath)) {
+      return;
+    }
+
+    const raw = readFileSync(this.#filePath, "utf8");
+    if (!raw.trim()) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    for (const record of parsed.sessions ?? []) {
+      if (record?.sessionId && record?.serverInstanceId) {
+        this.#sessions.set(record.sessionId, {
+          sessionId: record.sessionId,
+          serverInstanceId: record.serverInstanceId,
+          createdAt: record.createdAt ?? this.#now(),
+          updatedAt: record.updatedAt ?? this.#now(),
+          metadata: { ...(record.metadata ?? {}) },
+        });
+      }
+    }
+
+    this.pruneExpired();
+  }
+
+  #persist() {
+    mkdirSync(dirname(this.#filePath), { recursive: true });
+    const tmpPath = `${this.#filePath}.tmp`;
+    const payload = JSON.stringify(
+      {
+        version: 1,
+        sessions: this.list(),
+      },
+      null,
+      2,
+    );
+    writeFileSync(tmpPath, payload, "utf8");
+    renameSync(tmpPath, this.#filePath);
+  }
+}
+
+export function removeRegistryFile(filePath) {
+  if (existsSync(filePath)) {
+    rmSync(filePath, { force: true });
+  }
+}
+
+function cloneRecord(record) {
+  return {
+    ...record,
+    metadata: { ...record.metadata },
+  };
 }
 
 function isExpiredRecord(record, now) {

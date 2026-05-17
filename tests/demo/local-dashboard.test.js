@@ -57,8 +57,12 @@ test("dashboard handler serves the UI shell and live state", async () => {
   assert.equal(state.dashboard.title, "MCP Scaling Demo Dashboard");
   assert.equal(state.instances.length, 3);
   assert.equal(state.runtime.instances.length, 3);
+  assert.equal(state.runtime.registry.mode, "file");
+  assert.equal(state.runtime.registry.durable, true);
+  assert.equal(state.runtime.registry.sessionTtlMs, 60_000);
+  assert.equal(state.runtime.registry.reconnectGracePeriodMs, 15_000);
   assert.match(state.dashboard.status.implemented, /HTTP\/SSE gateway/);
-  assert.match(state.dashboard.status.planned, /durable session state/);
+  assert.match(state.dashboard.status.planned, /operator policy controls/);
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("mcp-application-server.js")));
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("demo-application-server.js")));
   assert.ok(state.dashboard.testProof.some((item) => item.includes("Transport-agnostic tests")));
@@ -68,9 +72,14 @@ test("local demo controller exposes the reusable-core milestone copy", () => {
   const state = new LocalDemoController().getState();
 
   assert.match(state.dashboard.problem, /transport adapters/);
+  assert.ok(
+    state.dashboard.walkthrough.includes(
+      "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
+    ),
+  );
   assert.equal(
-    state.dashboard.walkthrough.at(-1),
-    "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
+    state.runtime.policy,
+    "Runtime sessions now have an explicit lease. Every successful request refreshes the session TTL, and a disconnected client gets a short reconnect grace window before the gateway requires re-initialize.",
   );
   assert.ok(
     state.dashboard.codeAdded.some((item) => item.includes("stdio transport adapter")),
@@ -104,6 +113,68 @@ test("dashboard handler can create and use a real in-process runtime session", a
   assert.ok(
     echoed.state.runtime.events.some((event) => Array.isArray(event.details) && event.details.length > 0),
   );
+});
+
+test("dashboard handler can restart the runtime gateway and reconnect a durable session", async () => {
+  const handler = createDashboardHandler();
+
+  const createdResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/sessions",
+    body: {},
+  });
+  const created = JSON.parse(createdResponse.body);
+
+  const restartedResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/restart",
+    body: {},
+  });
+  assert.equal(restartedResponse.statusCode, 200);
+  const restarted = JSON.parse(restartedResponse.body);
+  assert.equal(restarted.runtime.registry.durable, true);
+
+  const echoedResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/echo",
+    body: {
+      sessionId: created.result.sessionId,
+    },
+  });
+  const echoed = JSON.parse(echoedResponse.body);
+  assert.equal(echoed.result.recovery.action, "reconnected-from-registry");
+});
+
+test("dashboard handler can simulate a disconnect and reconnect within grace", async () => {
+  const handler = createDashboardHandler();
+
+  const createdResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/sessions",
+    body: {},
+  });
+  const created = JSON.parse(createdResponse.body);
+
+  const disconnectedResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/disconnect",
+    body: {
+      sessionId: created.result.sessionId,
+    },
+  });
+  assert.equal(disconnectedResponse.statusCode, 200);
+  const disconnected = JSON.parse(disconnectedResponse.body);
+  assert.equal(disconnected.runtime.sessions[0].metadata.connectionState, "disconnected");
+
+  const echoedResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/echo",
+    body: {
+      sessionId: created.result.sessionId,
+    },
+  });
+  const echoed = JSON.parse(echoedResponse.body);
+  assert.equal(echoed.result.recovery.action, "reconnected-within-grace-period");
 });
 
 async function invokeHandler(handler, { method, url, headers = {}, body }) {

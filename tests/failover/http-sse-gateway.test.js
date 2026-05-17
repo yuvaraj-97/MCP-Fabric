@@ -24,6 +24,7 @@ test("HTTP/SSE gateway keeps a session sticky and exposes SSE events", async () 
     method: "initialize",
     params: { clientId: "sse-test" },
   });
+  assert.equal(initialized.recovery.action, "new-session");
 
   const eventStream = await invokeHttpHandler(handler, {
     method: "GET",
@@ -44,6 +45,7 @@ test("HTTP/SSE gateway keeps a session sticky and exposes SSE events", async () 
   assert.equal(initialized.serverInstanceId, "server-a");
   assert.equal(echoed.serverInstanceId, "server-a");
   assert.equal(echoed.reusedExistingSession, true);
+  assert.equal(echoed.recovery.action, "sticky-existing-session");
 
   const allEvents = parseSseEvents(eventStream.body);
   const requestEvent = allEvents.find((event) => event.event === "request.received").data;
@@ -85,6 +87,61 @@ test("HTTP/SSE gateway reassigns the session when the original instance becomes 
 
   assert.equal(echoed.serverInstanceId, "server-b");
   assert.equal(echoed.reusedExistingSession, false);
+  assert.equal(echoed.recovery.action, "reassigned-and-rehydrated");
+});
+
+test("HTTP/SSE gateway reconnects within grace and rejects reconnects after grace expiry", async () => {
+  const clock = createClock();
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    sessionTtlMs: 5_000,
+    reconnectGracePeriodMs: 100,
+    now: clock.now,
+  });
+  const handler = createGatewayHttpHandler({ controller });
+
+  const initialized = await sendHttpMessage(handler, {
+    method: "initialize",
+    params: { clientId: "grace-http-test" },
+  });
+
+  const eventStream = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: `/events?sessionId=${encodeURIComponent(initialized.sessionId)}`,
+    headers: { host: "127.0.0.1:3000", accept: "text/event-stream" },
+  });
+  eventStream.close();
+
+  clock.advance(50);
+  const withinGrace = await sendHttpMessage(handler, {
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: { message: "back in time" },
+  });
+  assert.equal(withinGrace.recovery.action, "reconnected-within-grace-period");
+
+  const secondEventStream = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: `/events?sessionId=${encodeURIComponent(initialized.sessionId)}`,
+    headers: { host: "127.0.0.1:3000", accept: "text/event-stream" },
+  });
+  secondEventStream.close();
+
+  clock.advance(101);
+  const expiredReconnect = await invokeHttpHandler(handler, {
+    method: "POST",
+    url: "/message",
+    headers: { host: "127.0.0.1:3000" },
+    body: {
+      method: "echo",
+      sessionId: initialized.sessionId,
+      params: { message: "too late" },
+    },
+  });
+
+  assert.equal(expiredReconnect.statusCode, 410);
+  const payload = parseJsonBody(expiredReconnect);
+  assert.equal(payload.code, "reconnect-grace-expired");
 });
 
 async function sendHttpMessage(handler, body) {
@@ -109,4 +166,15 @@ async function sendInstanceUpdate(handler, body) {
 
   assert.equal(response.statusCode, 200);
   return parseJsonBody(response);
+}
+
+function createClock(start = 1_700_000_000_000) {
+  let current = start;
+  return {
+    now: () => current,
+    advance(ms) {
+      current += ms;
+      return current;
+    },
+  };
 }

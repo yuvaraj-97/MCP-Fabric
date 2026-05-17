@@ -1,8 +1,13 @@
 import { LoadRouter } from "../load-balancer/load-router.js";
+import { FileSessionRegistry, removeRegistryFile } from "../session-registry/file-session-registry.js";
 import { MemorySessionRegistry } from "../session-registry/memory-session-registry.js";
 import { createHttpSseGatewayController } from "../../transports/http-sse/gateway-server.js";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 const DEFAULT_LOAD_THRESHOLD = 0.7;
+const DEFAULT_RUNTIME_SESSION_TTL_MS = 60_000;
+const DEFAULT_RUNTIME_RECONNECT_GRACE_MS = 15_000;
 const DEFAULT_INSTANCES = [
   { serverInstanceId: "server-a", healthy: true, load: 0.22, acceptingNewSessions: true },
   { serverInstanceId: "server-b", healthy: true, load: 0.48, acceptingNewSessions: true },
@@ -37,20 +42,20 @@ const DASHBOARD_COPY = {
   ],
   status: {
     implemented:
-      "Today the repo has a reusable MCP core, a session context helper, a framed stdio adapter, a newline stdio demo harness, an HTTP/SSE gateway, an in-memory session registry, a load-aware router, and this local dashboard.",
+      "Today the repo has a reusable MCP core, a session context helper, a framed stdio adapter, a newline stdio demo harness, an HTTP/SSE gateway, a durable file-backed runtime session registry, explicit restart and reconnect recovery behavior, session TTL plus reconnect grace-window enforcement, a load-aware router, and this local dashboard.",
     planned:
-      "Next comes durable session state, one shared application boundary across all transports, and fuller self-hosted gateway packaging for real MCP deployments.",
+      "Next comes external production-grade state backends, clearer operator policy controls for TTL and reconnect rules, and fuller self-hosted gateway packaging for real MCP deployments.",
   },
   improvements: [
     {
       title: "What improved",
       body:
-        "The prototype now has both transport-level demos and a reusable core slice, while the dashboard makes the routing and architecture story visible without reading code only.",
+        "The prototype now has both transport-level demos and a reusable core slice, plus durable runtime session storage, explicit restart/reconnect behavior, and gateway-enforced session lease rules.",
     },
     {
       title: "Why it matters",
       body:
-        "It proves the same application behavior can be reached through stdio and HTTP/SSE while session stickiness, overload protection, and unhealthy-instance reassignment remain visible at the gateway layer.",
+        "It proves the same application behavior can be reached through stdio and HTTP/SSE while sticky sessions survive runtime restarts, overloaded servers are skipped, unhealthy-instance reassignment remains visible at the gateway layer, and stale sessions are rejected instead of silently lingering forever.",
     },
   ],
   codeAdded: [
@@ -59,6 +64,8 @@ const DASHBOARD_COPY = {
     "packages/core/protocol-adapter/demo-application-server.js now gives the demo application the same handleMessage boundary used by multiple transports.",
     "packages/transports/stdio/stdio-transport.js now provides a real stdio transport adapter with Content-Length framing.",
     "packages/transports/http-sse/gateway-server.js now provides a sticky-session HTTP/SSE gateway with an inspector and SSE event streaming.",
+    "packages/gateway/session-registry/file-session-registry.js now provides durable file-backed session persistence for restart and reconnect flows.",
+    "packages/gateway/session-registry/*.js now track session expiry, disconnect state, and reconnect grace metadata.",
     "examples/shared/scaling-demo-server.js, examples/stdio-server/server.js, and examples/http-sse-server/server.js prove the transports can be exercised locally.",
     "packages/gateway/demo/local-demo-controller.js simulates fake MCP instances, sessions, and decision logs.",
     "apps/local-dashboard/server.js serves the local dashboard and JSON API.",
@@ -69,20 +76,24 @@ const DASHBOARD_COPY = {
     "Stdio adapter tests verify framed MCP-style input and output behavior.",
     "Demo-application parity tests verify the same basic behavior can run through both stdio and HTTP/SSE-oriented flows.",
     "Session registry unit tests verify assign, update, delete, deleteByServer, and list copy behavior.",
+    "Lifecycle tests verify session TTL expiry, disconnect grace windows, and explicit reinitialize requirements after grace expiration.",
     "Router tests verify least-loaded selection, sticky existing sessions, overload blocking, unhealthy reassignment, and trace output.",
     "Dashboard smoke tests verify the local UI and API start correctly and expose live state.",
-    "Socket-bound HTTP/SSE tests are kept as integration coverage because they exercise real HTTP and SSE wiring.",
+    "Gateway failover tests now prove durable restart reconnects and explicit recovery actions such as reconnected-from-registry and reassigned-and-rehydrated.",
   ],
   walkthrough: [
     "Create a new session and watch the least-loaded healthy instance win.",
     "Raise one instance above the threshold, then create another session and confirm it is skipped.",
     "Route an existing session again and confirm it stays sticky to the same server.",
     "Mark the assigned server unhealthy, route the session again, and watch the reassignment step appear in the decision log.",
+    "In the runtime panel, disconnect a session, reconnect within the grace window, and observe the explicit recovery action.",
   ],
   runtime: {
     title: "Real HTTP/SSE gateway view",
     body:
       "This section uses the real in-process HTTP/SSE gateway controller, so the main dashboard can show both the explainer model and actual transport-backed gateway behavior on the same page.",
+    policy:
+      "Runtime sessions now have an explicit lease. Every successful request refreshes the session TTL, and a disconnected client gets a short reconnect grace window before the gateway requires re-initialize.",
   },
 };
 
@@ -95,26 +106,36 @@ export class LocalDemoController {
   #runtimeController;
   #runtimeCollectors = new Map();
   #runtimeEvents = [];
+  #runtimeRegistryPath;
+  #runtimeInstances = [];
+  #runtimeSessionTtlMs;
+  #runtimeReconnectGraceMs;
 
-  constructor({ loadThreshold = DEFAULT_LOAD_THRESHOLD, initialInstances = DEFAULT_INSTANCES } = {}) {
+  constructor({
+    loadThreshold = DEFAULT_LOAD_THRESHOLD,
+    initialInstances = DEFAULT_INSTANCES,
+    runtimeRegistryPath,
+  } = {}) {
     if (typeof loadThreshold !== "number" || loadThreshold < 0 || loadThreshold > 1) {
       throw new RangeError("loadThreshold must be a number between 0 and 1");
     }
 
     this.#loadThreshold = loadThreshold;
+    this.#runtimeRegistryPath = runtimeRegistryPath ?? join("/tmp", `mcp-dashboard-registry-${randomUUID()}.json`);
+    this.#runtimeSessionTtlMs = DEFAULT_RUNTIME_SESSION_TTL_MS;
+    this.#runtimeReconnectGraceMs = DEFAULT_RUNTIME_RECONNECT_GRACE_MS;
     this.reset(initialInstances);
   }
 
   reset(initialInstances = DEFAULT_INSTANCES) {
+    removeRegistryFile(this.#runtimeRegistryPath);
     this.#registry = new MemorySessionRegistry();
     this.#router = new LoadRouter({
       sessionRegistry: this.#registry,
       loadThreshold: this.#loadThreshold,
     });
-    this.#runtimeController = createHttpSseGatewayController({
-      serverInstances: initialInstances,
-      loadThreshold: this.#loadThreshold,
-    });
+    this.#runtimeInstances = initialInstances.map((instance) => ({ ...instance }));
+    this.#runtimeController = this.#buildRuntimeController();
     this.#events = [];
     this.#runtimeCollectors = new Map();
     this.#runtimeEvents = [];
@@ -184,10 +205,13 @@ export class LocalDemoController {
       ...current,
       ...updates,
     });
-    this.#runtimeController.upsertInstance({
+    const nextRuntime = this.#runtimeController.upsertInstance({
       ...current,
       ...updates,
     });
+    this.#runtimeInstances = this.#runtimeInstances.map((instance) =>
+      instance.serverInstanceId === nextRuntime.serverInstanceId ? { ...nextRuntime } : instance,
+    );
 
     this.#recordEvent({
       kind: "instance-update",
@@ -223,6 +247,7 @@ export class LocalDemoController {
         `sessionId = ${result.sessionId}`,
         `serverInstanceId = ${result.serverInstanceId}`,
         `reusedExistingSession = ${result.reusedExistingSession}`,
+        `recovery.action = ${result.recovery.action}`,
       ],
     });
 
@@ -252,6 +277,7 @@ export class LocalDemoController {
         `serverInstanceId = ${result.serverInstanceId}`,
         `message = ${result.result.message}`,
         `requestCount = ${result.result.requestCount}`,
+        `recovery.action = ${result.recovery.action}`,
       ],
     });
 
@@ -259,6 +285,51 @@ export class LocalDemoController {
       result,
       state: this.getState(),
     };
+  }
+
+  disconnectRuntimeSession(sessionId) {
+    const normalizedSessionId = normalizeRequiredSessionId(sessionId);
+    const collector = this.#runtimeCollectors.get(normalizedSessionId);
+    if (collector) {
+      this.#runtimeController.detachEventStream(normalizedSessionId, collector);
+      this.#runtimeCollectors.delete(normalizedSessionId);
+    } else {
+      this.#runtimeController.sessionRegistry.markDisconnected?.(normalizedSessionId, {
+        gracePeriodMs: this.#runtimeReconnectGraceMs,
+      });
+    }
+
+    const record = this.#runtimeController.sessionRegistry.get(normalizedSessionId);
+    this.#recordRuntimeEvent({
+      kind: "runtime-disconnect",
+      title: `Disconnected runtime session ${normalizedSessionId}`,
+      summary: `The gateway marked ${normalizedSessionId} as disconnected and started its reconnect grace window.`,
+      details: record
+        ? [
+            `sessionId = ${record.sessionId}`,
+            `connectionState = ${record.metadata.connectionState}`,
+            `graceUntil = ${record.metadata.graceUntil}`,
+          ]
+        : [`sessionId = ${normalizedSessionId}`, "No registry record was found after disconnect."],
+    });
+
+    return this.getState();
+  }
+
+  restartRuntimeController() {
+    this.#runtimeCollectors = new Map();
+    this.#runtimeController = this.#buildRuntimeController();
+    this.#recordRuntimeEvent({
+      kind: "runtime-restart",
+      title: "Restarted runtime gateway controller",
+      summary: "A fresh in-process HTTP/SSE gateway controller was created using the same durable session registry file.",
+      details: [
+        `registry.mode = ${this.#runtimeController.describeRegistry().mode}`,
+        `registry.durable = ${this.#runtimeController.describeRegistry().durable}`,
+      ],
+    });
+
+    return this.getState();
   }
 
   #routeSession(sessionId, { mode }) {
@@ -309,10 +380,12 @@ export class LocalDemoController {
     return {
       title: DASHBOARD_COPY.runtime.title,
       body: DASHBOARD_COPY.runtime.body,
+      policy: DASHBOARD_COPY.runtime.policy,
       instances,
       sessions,
       events: this.#runtimeEvents.map((event) => ({ ...event })),
       latestSessionId: sessions.at(-1)?.sessionId ?? null,
+      registry: this.#runtimeController.describeRegistry(),
     };
   }
 
@@ -351,6 +424,18 @@ export class LocalDemoController {
       ...event,
     };
     this.#runtimeEvents = [entry, ...this.#runtimeEvents].slice(0, 20);
+  }
+
+  #buildRuntimeController() {
+    return createHttpSseGatewayController({
+      serverInstances: this.#runtimeInstances,
+      loadThreshold: this.#loadThreshold,
+      sessionRegistry: new FileSessionRegistry({
+        filePath: this.#runtimeRegistryPath,
+      }),
+      sessionTtlMs: this.#runtimeSessionTtlMs,
+      reconnectGracePeriodMs: this.#runtimeReconnectGraceMs,
+    });
   }
 }
 

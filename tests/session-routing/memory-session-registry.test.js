@@ -62,3 +62,51 @@ test("list and get return defensive copies", () => {
 
   assert.equal(registry.get("session-1").metadata.state, "live");
 });
+
+test("memory registry reports non-durable storage", () => {
+  const registry = new MemorySessionRegistry();
+
+  assert.equal(registry.storageKind(), "memory");
+  assert.equal(registry.isDurable(), false);
+});
+
+test("expired sessions are pruned from the memory registry", () => {
+  const clock = createClock();
+  const registry = new MemorySessionRegistry({ now: clock.now });
+
+  registry.assign("session-ttl", "server-a", { expiresAt: clock.now() + 100 });
+  clock.advance(101);
+
+  assert.equal(registry.get("session-ttl"), undefined);
+  assert.equal(registry.list().length, 0);
+});
+
+test("memory registry tracks disconnect and reconnect grace metadata", () => {
+  const clock = createClock();
+  const registry = new MemorySessionRegistry({ now: clock.now });
+
+  registry.assign("session-grace", "server-a", { expiresAt: clock.now() + 5_000 });
+  const disconnected = registry.markDisconnected("session-grace", { gracePeriodMs: 250 });
+
+  assert.equal(disconnected.metadata.connectionState, "disconnected");
+  assert.equal(disconnected.metadata.disconnectedAt, clock.now());
+  assert.equal(disconnected.metadata.graceUntil, clock.now() + 250);
+  assert.equal(registry.isWithinGrace("session-grace"), true);
+
+  const reconnected = registry.markReconnected("session-grace");
+  assert.equal(reconnected.metadata.connectionState, "active");
+  assert.equal(reconnected.metadata.disconnectedAt, null);
+  assert.equal(reconnected.metadata.graceUntil, null);
+  assert.equal(registry.isWithinGrace("session-grace"), false);
+});
+
+function createClock(start = 1_700_000_000_000) {
+  let current = start;
+  return {
+    now: () => current,
+    advance(ms) {
+      current += ms;
+      return current;
+    },
+  };
+}

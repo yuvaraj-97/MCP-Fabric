@@ -91,12 +91,15 @@
             <h2>Real HTTP/SSE gateway preview</h2>
             <p>The main dashboard now includes real in-process gateway state, with the standalone inspector available as an optional deep dive.</p>
           </div>
+          <p id="runtime-policy-copy" class="hero-copy"></p>
           <div class="controls">
             <button id="create-runtime-session-button" class="button button-primary">Create runtime session</button>
             <div class="inline-form">
               <input id="runtime-session-input" placeholder="Runtime session id" />
               <button id="runtime-echo-button" class="button">Send runtime echo</button>
+              <button id="runtime-disconnect-button" class="button">Simulate disconnect</button>
             </div>
+            <button id="restart-runtime-button" class="button button-ghost">Restart runtime gateway</button>
           </div>
           <div id="runtime-summary" class="summary-strip"></div>
           <div id="runtime-session-table"></div>
