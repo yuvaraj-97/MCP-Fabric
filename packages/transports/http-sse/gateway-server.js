@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-application-server.js";
 import { DEFAULT_GATEWAY_OPERATOR_CONFIG, resolveOperatorConfig } from "../../gateway/config/operator-config.js";
 import { LoadRouter } from "../../gateway/load-balancer/load-router.js";
+import { createGatewayObserver } from "../../gateway/observability/gateway-observer.js";
 import { MemorySessionRegistry } from "../../gateway/session-registry/memory-session-registry.js";
 
 export function createHttpSseGatewayServer({
@@ -11,6 +12,7 @@ export function createHttpSseGatewayServer({
     { serverInstanceId: "server-a", load: 0.2, healthy: true, acceptingNewSessions: true },
     { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
   ],
+  createApplication,
   operatorConfig,
   loadThreshold,
   sessionRegistry,
@@ -28,6 +30,7 @@ export function createHttpSseGatewayServer({
   });
   const controller = createHttpSseGatewayController({
     serverInstances,
+    createApplication,
     operatorConfig: resolvedOperatorConfig,
     sessionRegistry,
     now,
@@ -86,6 +89,10 @@ export function createGatewayHttpHandler({
           instances: controller.router.listInstances(),
           sessions: controller.sessionRegistry.list(),
         });
+      }
+
+      if (request.method === "GET" && url.pathname === "/observability") {
+        return sendJson(response, 200, controller.describeObservability());
       }
 
       if (request.method === "POST" && url.pathname === "/instances") {
@@ -149,6 +156,7 @@ export function createHttpSseGatewayController({
     { serverInstanceId: "server-a", load: 0.2, healthy: true, acceptingNewSessions: true },
     { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
   ],
+  createApplication = defaultApplicationFactory,
   operatorConfig,
   loadThreshold,
   sessionRegistry,
@@ -176,19 +184,18 @@ export function createHttpSseGatewayController({
   });
   const applications = new Map();
   const eventStreams = new Map();
+  const observer = createGatewayObserver({ now });
 
   for (const instance of serverInstances) {
     router.upsertInstance(instance);
-    applications.set(
-      instance.serverInstanceId,
-      createDemoApplicationServer({ serverInstanceId: instance.serverInstanceId }),
-    );
+    applications.set(instance.serverInstanceId, createApplication({ ...instance }));
   }
 
   return {
     router,
     sessionRegistry: resolvedSessionRegistry,
     applications,
+    observer,
     describeRegistry() {
       return {
         mode:
@@ -208,13 +215,22 @@ export function createHttpSseGatewayController({
             : undefined,
       };
     },
+    describeObservability() {
+      return {
+        summary: observer.summary(),
+        recentEvents: observer.listEvents(),
+      };
+    },
     upsertInstance(instance) {
       const updated = router.upsertInstance(instance);
+      observer.record("instance.updated", {
+        serverInstanceId: updated.serverInstanceId,
+        healthy: updated.healthy,
+        load: updated.load,
+        acceptingNewSessions: updated.acceptingNewSessions,
+      });
       if (!applications.has(updated.serverInstanceId)) {
-        applications.set(
-          updated.serverInstanceId,
-          createDemoApplicationServer({ serverInstanceId: updated.serverInstanceId }),
-        );
+        applications.set(updated.serverInstanceId, createApplication({ ...updated }));
       }
 
       return updated;
@@ -223,6 +239,11 @@ export function createHttpSseGatewayController({
       const record = resolvedSessionRegistry.get(sessionId);
       if (!record) {
         addEventStream(eventStreams, sessionId, response);
+        observer.record("stream.attached", {
+          sessionId,
+          serverInstanceId: null,
+          activeSessionRecord: false,
+        });
         return null;
       }
 
@@ -238,6 +259,12 @@ export function createHttpSseGatewayController({
       }
 
       addEventStream(eventStreams, sessionId, response);
+      observer.record("stream.attached", {
+        sessionId,
+        serverInstanceId: record.serverInstanceId,
+        activeSessionRecord: true,
+        reconnectState,
+      });
       return record;
     },
     detachEventStream(sessionId, response) {
@@ -247,6 +274,10 @@ export function createHttpSseGatewayController({
           gracePeriodMs: effectiveReconnectGracePeriodMs,
         });
       }
+      observer.record("stream.detached", {
+        sessionId,
+        remainingAttachments: eventStreams.get(sessionId)?.size ?? 0,
+      });
     },
     async handleGatewayMessage(body) {
       resolvedSessionRegistry.pruneExpired?.();
@@ -254,8 +285,18 @@ export function createHttpSseGatewayController({
       const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
       const existingSessionRecord = sessionId ? resolvedSessionRegistry.get(sessionId) : undefined;
       const requestNow = now();
+      observer.record("request.received", {
+        method,
+        sessionId,
+        existingSessionRecord: Boolean(existingSessionRecord),
+      });
 
       if (method !== "initialize" && !existingSessionRecord) {
+        observer.record("request.rejected", {
+          method,
+          sessionId,
+          code: "session-not-found",
+        });
         throw createGatewaySessionError({
           sessionId,
           code: "session-not-found",
@@ -267,6 +308,11 @@ export function createHttpSseGatewayController({
       const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
       if (method !== "initialize" && reconnectState === "grace-expired") {
         resolvedSessionRegistry.delete(sessionId);
+        observer.record("request.rejected", {
+          method,
+          sessionId,
+          code: "reconnect-grace-expired",
+        });
         throw createGatewaySessionError({
           sessionId,
           code: "reconnect-grace-expired",
@@ -318,6 +364,11 @@ export function createHttpSseGatewayController({
           clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
           observedAt: new Date().toISOString(),
         });
+        observer.record("session.rehydrated", {
+          sessionId,
+          serverInstanceId: route.serverInstanceId,
+          recoveryAction,
+        });
       }
 
       const envelope = await application.handleMessage(
@@ -353,6 +404,13 @@ export function createHttpSseGatewayController({
         reusedExistingSession: route.reusedExistingSession,
         observedAt: new Date().toISOString(),
       });
+      observer.record("route.completed", {
+        method,
+        sessionId,
+        serverInstanceId: route.serverInstanceId,
+        reusedExistingSession: route.reusedExistingSession,
+        recoveryAction,
+      });
 
       return {
         sessionId,
@@ -369,7 +427,14 @@ export function createHttpSseGatewayController({
     listPublishedEvents(sessionId) {
       return Array.from(eventStreams.get(sessionId) ?? []);
     },
+    listAuditEvents(limit) {
+      return observer.listEvents(typeof limit === "number" ? { limit } : undefined);
+    },
   };
+}
+
+function defaultApplicationFactory({ serverInstanceId }) {
+  return createDemoApplicationServer({ serverInstanceId });
 }
 
 function determineRecoveryAction({

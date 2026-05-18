@@ -19,6 +19,9 @@ confirm the recent infrastructure improvements are actually taking effect.
 | `npm run demo` | Yes, local UI only | Beginner-friendly dashboard on port `4321` |
 | `npm run demo:http` | Yes | Single-instance HTTP/SSE inspector on port `3000` |
 | `npm run demo:multi` | Yes | Multi-instance gateway inspector on port `3001` |
+| `npm run validate:filesystem` | No | Headless filesystem workload validation over both `stdio` and gateway-backed HTTP/SSE |
+| `npm run validate:filesystem:conversation` | No | Headless scripted conversation walkthrough for the filesystem workload |
+| `npm run validate:filesystem:openai` | No, but requires outbound API access | Headless OpenAI tool-calling conversation over the same filesystem workload |
 
 ### 1. Transport parity
 
@@ -55,6 +58,7 @@ Execution:
 
 - automated local tests
 - gateway inspection endpoint for current session mappings
+- gateway observability endpoint for recent audit events and counters
 
 ### 3. SSE and step-by-step inspection
 

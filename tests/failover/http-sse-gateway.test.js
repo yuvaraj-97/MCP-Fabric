@@ -144,6 +144,29 @@ test("HTTP/SSE gateway reconnects within grace and rejects reconnects after grac
   assert.equal(payload.code, "reconnect-grace-expired");
 });
 
+test("HTTP/SSE gateway exposes operator observability over HTTP", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+  const handler = createGatewayHttpHandler({ controller });
+
+  await sendHttpMessage(handler, {
+    method: "initialize",
+    params: { clientId: "obs-http-test" },
+  });
+
+  const response = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: "/observability",
+    headers: { host: "127.0.0.1:3000" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = parseJsonBody(response);
+  assert.ok(payload.summary.totalRequests >= 1);
+  assert.ok(payload.recentEvents.some((event) => event.eventType === "request.received"));
+});
+
 async function sendHttpMessage(handler, body) {
   const response = await invokeHttpHandler(handler, {
     method: "POST",

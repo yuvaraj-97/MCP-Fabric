@@ -42,20 +42,20 @@ const DASHBOARD_COPY = {
   ],
   status: {
     implemented:
-      "Today the repo has a reusable MCP core, a session context helper, a framed stdio adapter, a newline stdio demo harness, an HTTP/SSE gateway, a durable file-backed runtime session registry, explicit restart and reconnect recovery behavior, session TTL plus reconnect grace-window enforcement, a load-aware router, and this local dashboard.",
+      "Today the repo has a reusable MCP core, a session context helper, a framed stdio adapter, a newline stdio demo harness, an HTTP/SSE gateway, a durable file-backed runtime session registry, explicit restart and reconnect recovery behavior, session TTL plus reconnect grace-window enforcement, operator config defaults, structured runtime observability counters and audit events, a load-aware router, and this local dashboard.",
     planned:
-      "Next comes external production-grade state backends, fuller operator workflows and observability, and clearer self-hosted gateway packaging for real MCP deployments.",
+      "Next comes external production-grade state backends, structured log and metrics sinks, fuller operator runbooks and workflows, and clearer self-hosted gateway packaging for real MCP deployments.",
   },
   improvements: [
     {
       title: "What improved",
       body:
-        "The prototype now has both transport-level demos and a reusable core slice, plus durable runtime session storage, explicit restart/reconnect behavior, and gateway-enforced session lease rules.",
+        "The prototype now has both transport-level demos and a reusable core slice, plus durable runtime session storage, explicit restart/reconnect behavior, gateway-enforced session lease rules, and operator-visible gateway audit history.",
     },
     {
       title: "Why it matters",
       body:
-        "It proves the same application behavior can be reached through stdio and HTTP/SSE while sticky sessions survive runtime restarts, overloaded servers are skipped, unhealthy-instance reassignment remains visible at the gateway layer, and stale sessions are rejected instead of silently lingering forever.",
+        "It proves the same application behavior can be reached through stdio and HTTP/SSE while sticky sessions survive runtime restarts, overloaded servers are skipped, unhealthy-instance reassignment remains visible at the gateway layer, stale sessions are rejected instead of silently lingering forever, and operators can inspect what the gateway decided after the fact.",
     },
   ],
   codeAdded: [
@@ -67,6 +67,7 @@ const DASHBOARD_COPY = {
     "packages/gateway/session-registry/file-session-registry.js now provides durable file-backed session persistence for restart and reconnect flows.",
     "packages/gateway/session-registry/*.js now track session expiry, disconnect state, and reconnect grace metadata.",
     "packages/gateway/config/operator-config.js now centralizes operator-facing policy defaults and environment-driven overrides.",
+    "packages/gateway/observability/gateway-observer.js now records structured runtime audit events and operator-facing counters.",
     "examples/shared/scaling-demo-server.js, examples/stdio-server/server.js, and examples/http-sse-server/server.js prove the transports can be exercised locally.",
     "packages/gateway/demo/local-demo-controller.js simulates fake MCP instances, sessions, and decision logs.",
     "apps/local-dashboard/server.js serves the local dashboard and JSON API.",
@@ -81,6 +82,7 @@ const DASHBOARD_COPY = {
     "Router tests verify least-loaded selection, sticky existing sessions, overload blocking, unhealthy reassignment, and trace output.",
     "Dashboard smoke tests verify the local UI and API start correctly and expose live state.",
     "Gateway failover tests now prove durable restart reconnects and explicit recovery actions such as reconnected-from-registry and reassigned-and-rehydrated.",
+    "Observability tests verify that runtime counters and recent gateway audit events are exposed through the controller, HTTP endpoint, and dashboard state.",
   ],
   walkthrough: [
     "Create a new session and watch the least-loaded healthy instance win.",
@@ -95,6 +97,8 @@ const DASHBOARD_COPY = {
       "This section uses the real in-process HTTP/SSE gateway controller, so the main dashboard can show both the explainer model and actual transport-backed gateway behavior on the same page.",
     policy:
       "Runtime sessions now have an explicit lease. Every successful request refreshes the session TTL, and a disconnected client gets a short reconnect grace window before the gateway requires re-initialize.",
+    observability:
+      "The runtime panel now also exposes operator observability: recent structured gateway events and high-level counters for requests, reconnects, reassignments, rejections, and stream activity.",
   },
 };
 
@@ -385,12 +389,14 @@ export class LocalDemoController {
       title: DASHBOARD_COPY.runtime.title,
       body: DASHBOARD_COPY.runtime.body,
       policy: DASHBOARD_COPY.runtime.policy,
+      observabilityCopy: DASHBOARD_COPY.runtime.observability,
       instances,
       sessions,
       events: this.#runtimeEvents.map((event) => ({ ...event })),
       latestSessionId: sessions.at(-1)?.sessionId ?? null,
       registry: this.#runtimeController.describeRegistry(),
       operatorConfig: { ...this.#operatorConfig },
+      observability: this.#runtimeController.describeObservability(),
     };
   }
 

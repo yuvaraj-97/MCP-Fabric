@@ -8,6 +8,7 @@ import {
   operatorConfigFromEnv,
 } from "../../packages/gateway/config/operator-config.js";
 import { LocalDemoController } from "../../packages/gateway/demo/local-demo-controller.js";
+import { ValidationController } from "../../validation/controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,12 +21,14 @@ export function createDashboardServer({
   port = operatorConfig.port,
 } = {}) {
   const controller = new LocalDemoController({ operatorConfig });
-  const handler = createDashboardHandler({ controller });
+  const validationController = new ValidationController();
+  const handler = createDashboardHandler({ controller, validationController });
 
   const server = createServer(handler);
 
   return {
     controller,
+    validationController,
     start() {
       return new Promise((resolve) => {
         server.listen(port, "127.0.0.1", () => {
@@ -54,6 +57,7 @@ export function createDashboardHandler({
     defaults: DEFAULT_DASHBOARD_OPERATOR_CONFIG,
   }),
   controller = new LocalDemoController({ operatorConfig }),
+  validationController = new ValidationController(),
 } = {}) {
   return async (request, response) => {
     try {
@@ -94,6 +98,28 @@ export function createDashboardHandler({
 
       if (request.method === "POST" && url.pathname === "/api/runtime/restart") {
         return writeJson(response, 200, controller.restartRuntimeController());
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/runtime/observability") {
+        return writeJson(response, 200, controller.getState().runtime.observability);
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/validation/scenarios") {
+        return writeJson(response, 200, validationController.listScenarios());
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/validation/reset") {
+        const body = await readJsonBody(request);
+        return writeJson(response, 200, validationController.resetScenario(body.scenarioId));
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/validation/step") {
+        const body = await readJsonBody(request);
+        return writeJson(
+          response,
+          200,
+          await validationController.runStep(body.scenarioId, body.stepId),
+        );
       }
 
       if (request.method === "PATCH" && url.pathname.startsWith("/api/instances/")) {

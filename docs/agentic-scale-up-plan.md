@@ -164,6 +164,7 @@ Missing pieces:
   path
 - production-grade durable session registry backends beyond the local file-backed prototype
 - fuller operator workflows around TTL, reconnect grace windows, restart policy defaults, and observability
+- structured log/metrics sinks beyond the current in-process audit trail
 - health/load reporting model for real instances
 - more complete observability and operator workflows
 - packaged standalone gateway runtime
@@ -381,6 +382,9 @@ into a real deployment argument.
 
 If this works with an open-source MCP server across separate machines or
 containers, the repo’s thesis becomes much more credible.
+
+The concrete execution details for that phase are captured in
+[`docs/real-world-validation-plan.md`](./real-world-validation-plan.md).
 
 ## Risks And Assumptions
 

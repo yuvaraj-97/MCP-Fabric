@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCP Validation Walkthrough</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">Laptop Validation</p>
+        <h1>Step-by-step MCP validation walkthrough</h1>
+        <p class="hero-copy">
+          Click each step to send a conversation-style request, inspect the exact output,
+          and understand what the repo is proving about stdio, HTTP/SSE, sticky routing,
+          and failover.
+        </p>
+      </header>
+
+      <main class="layout">
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Scenario</h2>
+            <p>Select either the deterministic scripted walkthrough or the OpenAI-backed conversation walkthrough for the same filesystem-style validation server.</p>
+          </div>
+          <div class="controls">
+            <button id="refresh-button" class="button">Refresh scenarios</button>
+            <button id="reset-button" class="button button-ghost">Reset selected scenario</button>
+          </div>
+          <div id="scenario-list" class="stack"></div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>Validation steps</h2>
+            <p>Run each step manually. Every step shows the prompt, what it tests, raw output, and the assistant-style interpretation.</p>
+          </div>
+          <div id="error-banner" class="status-block" hidden></div>
+          <div id="steps-list" class="stack"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/validation.js"></script>
+  </body>
+</html>

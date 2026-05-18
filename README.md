@@ -107,7 +107,8 @@ The implemented slices today are:
 - in-memory and file-backed session registries
 - load-aware router
 - HTTP/SSE gateway with session stickiness, explicit reconnect/recovery actions,
-  session TTL and reconnect grace-window enforcement, and SSE event visibility
+  session TTL and reconnect grace-window enforcement, SSE event visibility, and
+  basic operator observability
 - self-explaining local dashboard for routing behavior
 - automated tests for core dispatch, `stdio` transport behavior, stickiness,
   HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
@@ -116,6 +117,9 @@ The implemented slices today are:
 
 External production-grade state backends, operator-friendly policy controls, and
 fuller gateway packaging are still the next recommended build steps.
+
+The concrete next-phase deployment proof is documented in
+[docs/real-world-validation-plan.md](./docs/real-world-validation-plan.md).
 
 ## Operator Configuration
 
@@ -137,6 +141,12 @@ MCP_GATEWAY_SESSION_TTL_MS=90000 \
 MCP_GATEWAY_RECONNECT_GRACE_MS=12000 \
 npm run demo
 ```
+
+The gateway also exposes a JSON observability surface at `/observability` with:
+
+- recent structured audit events
+- request/rejection/reconnect/reassignment counters
+- stream attachment and detachment counters
 
 ## Recommended Path
 
@@ -207,16 +217,92 @@ Use the other demos when you want a narrower transport-specific deep dive.
 | Demo | Command | Port | Purpose |
 | --- | --- | --- | --- |
 | Local dashboard | `npm run demo` | `4321` | Main demo: beginner-friendly explanation plus real in-process gateway view |
+| Validation walkthrough page | `npm run demo` | `4321/validation.html` | Click each scripted conversation step and inspect what it proves plus the raw output |
 | stdio example | `npm run demo:stdio` | none | Shared example server over stdio |
 | Single-instance HTTP/SSE inspector | `npm run demo:http` | `3000` | Inspect one gateway-backed HTTP/SSE server |
 | Multi-instance gateway demo | `npm run demo:multi` | `3001` | Inspect sticky routing and failover across multiple instances |
 | Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
+| Filesystem validation harness | `npm run validate:filesystem` | none | Headless validation of the same filesystem-style MCP app over `stdio` and gateway-backed HTTP/SSE |
+| Filesystem conversation validation | `npm run validate:filesystem:conversation` | none | Headless scripted conversation proving the same app behavior over `stdio` and gateway-backed HTTP/SSE |
+| Filesystem OpenAI conversation validation | `npm run validate:filesystem:openai` | none | Headless tool-calling OpenAI conversation using the same validation workload |
 
 ## Run Tests
 
 ```sh
 npm test
 ```
+
+## Run Filesystem Validation
+
+```sh
+npm run validate:filesystem
+```
+
+This headless validation harness proves:
+
+- the same filesystem-style MCP application code runs over `stdio`
+- the same application code runs through the HTTP/SSE gateway
+- sticky routing works for follow-up requests
+- unhealthy-instance reassignment still preserves the underlying workload
+- gateway observability counters and audit events record what happened
+
+This is the first target in the real-world validation order:
+
+1. `filesystem`
+2. `git`
+3. `memory`
+
+## Run Filesystem Conversation Validation
+
+```sh
+npm run validate:filesystem:conversation
+```
+
+This headless scripted conversation flow simulates a user asking an assistant to:
+
+- connect over `stdio`
+- discover available filesystem tools
+- write a file
+- reconnect through the HTTP/SSE gateway
+- read and list the same file over the gateway path
+- force unhealthy-instance reassignment and confirm the file still reads
+
+## Run Filesystem OpenAI Conversation Validation
+
+```sh
+npm run validate:filesystem:openai
+```
+
+This uses `OPENAI_API_KEY` from the environment or `.env`, calls the OpenAI
+Responses API, and requires the model to invoke a validation tool for each
+conversation step before it replies in plain English.
+
+## Laptop Walkthrough Page
+
+Run:
+
+```sh
+npm run demo
+```
+
+Then open:
+
+```text
+http://127.0.0.1:4321/validation.html
+```
+
+That page lets you choose:
+
+- a deterministic scripted walkthrough
+- an OpenAI-backed conversation walkthrough if `OPENAI_API_KEY` is available
+
+Then click `Send step` for each turn and inspect:
+
+- the user-style prompt
+- what the step is testing
+- the expected outcome
+- the raw MCP-level output
+- an assistant-style summary of what just happened
 
 ## Run The stdio Example
 
@@ -266,6 +352,7 @@ It also lets you interactively:
 - restart the runtime gateway and reconnect an existing durable session
 - simulate a disconnect, reconnect within grace, and see the gateway explain the decision
 - inspect richer live runtime SSE event payloads from inside the same dashboard
+- inspect operator-facing gateway counters and recent audit events from the same dashboard
 
 ## HTTP/SSE Inspector
 

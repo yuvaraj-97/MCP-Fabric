@@ -16,7 +16,10 @@ const elements = {
   sessionTable: document.querySelector("#session-table"),
   runtimeSummary: document.querySelector("#runtime-summary"),
   runtimePolicyCopy: document.querySelector("#runtime-policy-copy"),
+  runtimeObservabilityCopy: document.querySelector("#runtime-observability-copy"),
   runtimeSessionTable: document.querySelector("#runtime-session-table"),
+  runtimeObservabilitySummary: document.querySelector("#runtime-observability-summary"),
+  runtimeObservabilityLog: document.querySelector("#runtime-observability-log"),
   runtimeEventLog: document.querySelector("#runtime-event-log"),
   eventLog: document.querySelector("#event-log"),
   createSessionButton: document.querySelector("#create-session-button"),
@@ -285,6 +288,7 @@ function renderEvents(events) {
 
 function renderRuntime(runtime) {
   elements.runtimePolicyCopy.textContent = runtime.policy;
+  elements.runtimeObservabilityCopy.textContent = runtime.observabilityCopy;
   const summaryCards = [
     { label: "Gateway instances", value: runtime.instances.length },
     { label: "Gateway sessions", value: runtime.sessions.length },
@@ -357,6 +361,45 @@ function renderRuntime(runtime) {
               ? `<ol>${event.details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}</ol>`
               : ""
           }
+        </article>
+      `,
+    )
+    .join("");
+
+  renderRuntimeObservability(runtime.observability);
+}
+
+function renderRuntimeObservability(observability) {
+  const cards = [
+    { label: "Requests", value: observability.summary.totalRequests },
+    { label: "Rejected", value: observability.summary.totalRejectedRequests },
+    { label: "Reconnects", value: observability.summary.totalReconnections },
+    { label: "Reassignments", value: observability.summary.totalReassignments },
+    { label: "Streams attached", value: observability.summary.totalStreamAttachments },
+    { label: "Recent audit events", value: observability.summary.recentEventCount },
+  ];
+
+  elements.runtimeObservabilitySummary.innerHTML = cards
+    .map(
+      (card) => `
+        <article class="summary-card">
+          <strong>${escapeHtml(String(card.value))}</strong>
+          <span>${escapeHtml(card.label)}</span>
+        </article>
+      `,
+    )
+    .join("");
+
+  elements.runtimeObservabilityLog.innerHTML = observability.recentEvents
+    .map(
+      (event) => `
+        <article class="event-item">
+          <h3>${escapeHtml(event.eventType)}</h3>
+          <p>${escapeHtml(new Date(event.timestamp).toLocaleString())}</p>
+          <ol>${Object.entries(event)
+            .filter(([key]) => !["id", "timestamp", "eventType"].includes(key))
+            .map(([key, value]) => `<li>${escapeHtml(`${key} = ${typeof value === "object" ? JSON.stringify(value) : String(value)}`)}</li>`)
+            .join("")}</ol>
         </article>
       `,
     )

@@ -205,6 +205,31 @@ test("gateway controller exposes operator-configured lifecycle policy values", (
   assert.equal(registry.reconnectGracePeriodMs, 12_000);
 });
 
+test("gateway controller records observability events and counters", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-observe",
+    params: { clientId: "observe-test" },
+  });
+
+  await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: { message: "observe me" },
+  });
+
+  const observability = controller.describeObservability();
+  assert.equal(observability.summary.totalRequests, 2);
+  assert.equal(observability.summary.totalInitializations, 1);
+  assert.ok(observability.summary.totalEvents >= 4);
+  assert.ok(observability.recentEvents.some((event) => event.eventType === "request.received"));
+  assert.ok(observability.recentEvents.some((event) => event.eventType === "route.completed"));
+});
+
 function createEventCollector() {
   return {
     chunks: [],

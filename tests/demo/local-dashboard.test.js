@@ -64,8 +64,9 @@ test("dashboard handler serves the UI shell and live state", async () => {
   assert.equal(state.runtime.registry.loadThreshold, 0.7);
   assert.equal(state.runtime.registry.sessionTtlMs, 60_000);
   assert.equal(state.runtime.registry.reconnectGracePeriodMs, 15_000);
+  assert.ok(state.runtime.observability.summary.totalEvents >= 0);
   assert.match(state.dashboard.status.implemented, /HTTP\/SSE gateway/);
-  assert.match(state.dashboard.status.planned, /operator workflows and observability/);
+  assert.match(state.dashboard.status.planned, /structured log and metrics sinks/);
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("mcp-application-server.js")));
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("demo-application-server.js")));
   assert.ok(state.dashboard.testProof.some((item) => item.includes("Transport-agnostic tests")));
@@ -198,6 +199,51 @@ test("dashboard handler can simulate a disconnect and reconnect within grace", a
   });
   const echoed = JSON.parse(echoedResponse.body);
   assert.equal(echoed.result.recovery.action, "reconnected-within-grace-period");
+});
+
+test("dashboard runtime state exposes operator observability counters and audit events", async () => {
+  const handler = createDashboardHandler();
+
+  await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/runtime/sessions",
+    body: {},
+  });
+
+  const observabilityResponse = await invokeHandler(handler, {
+    method: "GET",
+    url: "/api/runtime/observability",
+  });
+  assert.equal(observabilityResponse.statusCode, 200);
+  const observability = JSON.parse(observabilityResponse.body);
+  assert.ok(observability.summary.totalRequests >= 1);
+  assert.ok(observability.recentEvents.some((event) => event.eventType === "request.received"));
+});
+
+test("dashboard exposes validation scenarios and can run a conversation step", async () => {
+  const handler = createDashboardHandler();
+
+  const scenariosResponse = await invokeHandler(handler, {
+    method: "GET",
+    url: "/api/validation/scenarios",
+  });
+  assert.equal(scenariosResponse.statusCode, 200);
+  const scenarios = JSON.parse(scenariosResponse.body);
+  assert.ok(scenarios.some((scenario) => scenario.id === "filesystem-conversation"));
+  assert.ok(scenarios.some((scenario) => scenario.id === "filesystem-openai-conversation"));
+
+  const stepResponse = await invokeHandler(handler, {
+    method: "POST",
+    url: "/api/validation/step",
+    body: {
+      scenarioId: "filesystem-conversation",
+      stepId: "stdio-initialize-and-discover",
+    },
+  });
+  assert.equal(stepResponse.statusCode, 200);
+  const step = JSON.parse(stepResponse.body);
+  assert.equal(step.result.transport, "stdio");
+  assert.match(step.result.assistantSummary, /stdio-connected MCP server/);
 });
 
 async function invokeHandler(handler, { method, url, headers = {}, body }) {
