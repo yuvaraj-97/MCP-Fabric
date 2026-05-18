@@ -26,7 +26,7 @@ export function createGitValidationWorkspace(name) {
   return rootDir;
 }
 
-export function describeGitValidationFile(rootDir, relativePath = "notes/hello.txt") {
+export function describeGitValidationFile(rootDir, relativePath = "notes/git-change.txt") {
   return {
     rootDir,
     relativePath,

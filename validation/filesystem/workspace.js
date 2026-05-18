@@ -8,7 +8,7 @@ export function createFilesystemValidationWorkspace(name) {
   return rootDir;
 }
 
-export function describeFilesystemValidationFile(rootDir, relativePath = "notes/hello.txt") {
+export function describeFilesystemValidationFile(rootDir, relativePath = "notes/filesystem-note.txt") {
   return {
     rootDir,
     relativePath,

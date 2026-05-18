@@ -1,6 +1,6 @@
 const state = {
   scenarios: [],
-  selectedScenarioId: "filesystem-conversation",
+  selectedScenarioId: "filesystem-openai-conversation",
   pendingStepId: null,
   pendingScenarioId: null,
   pendingStatusIndex: 0,
@@ -22,6 +22,7 @@ const elements = {
   scenarioSelect: document.querySelector("#scenario-select"),
   refreshButton: document.querySelector("#refresh-button"),
   resetButton: document.querySelector("#reset-button"),
+  cleanupButton: document.querySelector("#cleanup-button"),
   errorBanner: document.querySelector("#error-banner"),
   liveStatus: document.querySelector("#live-status"),
 };
@@ -45,7 +46,7 @@ function wireEvents() {
   elements.refreshButton.addEventListener("click", refresh);
   elements.targetSelect.addEventListener("change", () => {
     const targetId = elements.targetSelect.value;
-    const matching = state.scenarios.find((scenario) => scenario.targetId === targetId);
+    const matching = chooseDefaultScenarioForTarget(targetId);
     if (matching) {
       state.selectedScenarioId = matching.id;
       render();
@@ -60,6 +61,11 @@ function wireEvents() {
     await postJson("/api/validation/reset", {
       scenarioId: state.selectedScenarioId,
     });
+    await refresh();
+  });
+  elements.cleanupButton.addEventListener("click", async () => {
+    clearPendingState();
+    await postJson("/api/validation/cleanup", {});
     await refresh();
   });
 }
@@ -588,4 +594,12 @@ function uniqueTargets(scenarios) {
     }
   }
   return Array.from(seen.values());
+}
+
+function chooseDefaultScenarioForTarget(targetId) {
+  const matching = state.scenarios.filter((scenario) => scenario.targetId === targetId);
+  return (
+    matching.find((scenario) => scenario.provider && scenario.available !== false) ||
+    matching[0]
+  );
 }

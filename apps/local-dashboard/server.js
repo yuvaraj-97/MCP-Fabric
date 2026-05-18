@@ -113,6 +113,10 @@ export function createDashboardHandler({
         return writeJson(response, 200, validationController.resetScenario(body.scenarioId));
       }
 
+      if (request.method === "POST" && url.pathname === "/api/validation/cleanup") {
+        return writeJson(response, 200, validationController.clearArtifacts());
+      }
+
       if (request.method === "POST" && url.pathname === "/api/validation/step") {
         const body = await readJsonBody(request);
         return writeJson(

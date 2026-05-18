@@ -197,7 +197,7 @@ function stepDefinitions() {
       title: "Write a repository file through stdio",
       transport: "stdio",
       userPrompt:
-        "Create notes/hello.txt with the text 'git validation works' so we can inspect repository state afterward.",
+        "Create notes/git-change.txt with the text 'git validation works' so we can inspect repository state afterward.",
       whatTesting:
         "Proves the stdio transport can make a real repository change that the gateway path can inspect and stage later.",
       expected:
@@ -209,7 +209,7 @@ function stepDefinitions() {
           params: {
             name: "git_write_file",
             arguments: {
-              path: "notes/hello.txt",
+              path: "notes/git-change.txt",
               content: "git validation works",
             },
           },
@@ -257,7 +257,7 @@ function stepDefinitions() {
       title: "Stage the file and confirm sticky routing",
       transport: "http-sse-gateway",
       userPrompt:
-        "Stage notes/hello.txt and make sure the follow-up request stays on the same gateway-routed server instance.",
+        "Stage notes/git-change.txt and make sure the follow-up request stays on the same gateway-routed server instance.",
       whatTesting:
         "Proves existing HTTP git sessions stay sticky to the same healthy server instance for follow-up requests while preserving repository state.",
       expected:
@@ -268,7 +268,7 @@ function stepDefinitions() {
           sessionId: runner.getHttpSessionId(),
           params: {
             name: "git_stage_paths",
-            arguments: { paths: ["notes/hello.txt"] },
+            arguments: { paths: ["notes/git-change.txt"] },
           },
         });
         const diff = await runner.sendHttp({

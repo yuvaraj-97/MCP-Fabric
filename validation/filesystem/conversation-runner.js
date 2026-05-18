@@ -266,7 +266,7 @@ function stepDefinitions() {
           params: {
             name: "fs_write_text",
             arguments: {
-              path: "notes/hello.txt",
+              path: "notes/filesystem-note.txt",
               content: "filesystem validation works",
             },
           },
@@ -309,7 +309,7 @@ function stepDefinitions() {
           params: {
             name: "fs_read_text",
             arguments: {
-              path: "notes/hello.txt",
+              path: "notes/filesystem-note.txt",
             },
           },
         });
@@ -392,7 +392,7 @@ function stepDefinitions() {
           params: {
             name: "fs_read_text",
             arguments: {
-              path: "notes/hello.txt",
+              path: "notes/filesystem-note.txt",
             },
           },
         });

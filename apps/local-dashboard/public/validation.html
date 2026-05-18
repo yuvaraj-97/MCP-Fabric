@@ -35,6 +35,7 @@
             </label>
             <button id="refresh-button" class="button">Refresh scenarios</button>
             <button id="reset-button" class="button button-ghost">Reset selected scenario</button>
+            <button id="cleanup-button" class="button button-ghost">Remove validation artifacts</button>
           </div>
           <div id="scenario-list" class="stack"></div>
         </section>
@@ -71,8 +72,8 @@
           </div>
           <div class="stack">
             <article class="event-item">
-              <h3>1. Add real token streaming</h3>
-              <p>Today the page shows live phases, but not token-by-token model output. The next UI upgrade is a true streamed assistant response from the OpenAI call into the right-side chat panel.</p>
+              <h3>1. Extend OpenAI mode to every target</h3>
+              <p>`filesystem`, `git`, and `memory` should all have both deterministic and OpenAI-backed modes, with OpenAI selected by default when the key is available.</p>
             </article>
             <article class="event-item">
               <h3>2. Repeat the same flow for `git`</h3>
