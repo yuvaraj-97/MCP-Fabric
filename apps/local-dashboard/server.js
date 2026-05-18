@@ -122,6 +122,13 @@ export function createDashboardHandler({
         );
       }
 
+      if (request.method === "POST" && url.pathname === "/api/validation/step/stream") {
+        const body = await readJsonBody(request);
+        return streamValidationStep(response, async (emit) =>
+          validationController.runStepStream(body.scenarioId, body.stepId, emit),
+        );
+      }
+
       if (request.method === "PATCH" && url.pathname.startsWith("/api/instances/")) {
         const serverInstanceId = decodeURIComponent(url.pathname.replace("/api/instances/", ""));
         const body = await readJsonBody(request);
@@ -139,6 +146,30 @@ export function createDashboardHandler({
       });
     }
   };
+}
+
+async function streamValidationStep(response, run) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+  });
+
+  const emit = (event) => {
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  try {
+    await run(emit);
+    emit({ type: "stream.completed" });
+  } catch (error) {
+    emit({
+      type: "error",
+      error: error.message,
+    });
+  } finally {
+    response.end();
+  }
 }
 
 async function serveStaticAsset(pathname, response) {

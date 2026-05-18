@@ -38,6 +38,56 @@ export function createOpenAIResponsesClient({
 
       return payload;
     },
+    async *createResponseStream(body) {
+      const response = await fetch(`${apiBase}/responses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          stream: true,
+          ...body,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(
+          `OpenAI API request failed (${response.status}): ${payload.error?.message ?? JSON.stringify(payload)}`,
+        );
+      }
+
+      if (!response.body) {
+        throw new Error("OpenAI API stream did not return a response body.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      for await (const chunk of response.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let boundaryIndex = buffer.indexOf("\n\n");
+        while (boundaryIndex !== -1) {
+          const frame = buffer.slice(0, boundaryIndex);
+          buffer = buffer.slice(boundaryIndex + 2);
+          const event = parseSseFrame(frame);
+          if (event) {
+            yield event;
+          }
+          boundaryIndex = buffer.indexOf("\n\n");
+        }
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        const event = parseSseFrame(buffer);
+        if (event) {
+          yield event;
+        }
+      }
+    },
   };
 }
 
@@ -76,4 +126,45 @@ export function resolveOpenAIApiKey({
   }
 
   return undefined;
+}
+
+function parseSseFrame(frame) {
+  const lines = frame.split(/\r?\n/);
+  let eventType = "message";
+  const dataLines = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      eventType = line.slice("event:".length).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  const rawData = dataLines.join("\n");
+  if (rawData === "[DONE]") {
+    return { type: "done" };
+  }
+
+  try {
+    const payload = JSON.parse(rawData);
+    return {
+      type: eventType,
+      payload,
+    };
+  } catch {
+    return {
+      type: eventType,
+      payload: rawData,
+    };
+  }
 }

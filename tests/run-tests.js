@@ -5,6 +5,8 @@ import "./session-routing/load-router.test.js";
 import "./validation/filesystem-validation.test.js";
 import "./validation/filesystem-conversation.test.js";
 import "./validation/filesystem-openai-conversation.test.js";
+import "./validation/git-validation.test.js";
+import "./validation/memory-validation.test.js";
 import "./transport-agnostic/mcp-application-server.test.js";
 import "./transport-agnostic/mcp-custom-methods.test.js";
 import "./transport-agnostic/stdio-transport.test.js";

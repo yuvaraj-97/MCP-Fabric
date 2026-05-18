@@ -62,6 +62,8 @@ export class FilesystemConversationRunner {
   describe() {
     return {
       id: "filesystem-conversation",
+      targetId: "filesystem",
+      targetLabel: "Filesystem",
       title: "Filesystem Conversation Validation",
       audience:
         "Validates that the same filesystem-style MCP application can support a conversation-like workflow over stdio and gateway-backed HTTP/SSE.",

@@ -22,9 +22,17 @@
         <section class="panel panel-wide">
           <div class="panel-header">
             <h2>Scenario</h2>
-            <p>Select either the deterministic scripted walkthrough or the OpenAI-backed conversation walkthrough for the same filesystem-style validation server.</p>
+            <p>Select which MCP workload you want to validate, then choose the deterministic or OpenAI-backed conversation mode when that target offers both.</p>
           </div>
           <div class="controls">
+            <label class="selector-field">
+              <span>MCP target</span>
+              <select id="target-select"></select>
+            </label>
+            <label class="selector-field">
+              <span>Validation mode</span>
+              <select id="scenario-select"></select>
+            </label>
             <button id="refresh-button" class="button">Refresh scenarios</button>
             <button id="reset-button" class="button button-ghost">Reset selected scenario</button>
           </div>
@@ -33,12 +41,52 @@
 
         <section class="panel panel-wide">
           <div class="panel-header">
-            <h2>Validation steps</h2>
-            <p>Run each step manually. Every step shows the prompt, what it tests, raw output, and the assistant-style interpretation.</p>
+            <h2>Conversation view</h2>
+            <p>The right-side thread keeps the user and assistant turns readable while the left side remains the operational control panel.</p>
           </div>
-          <div id="error-banner" class="status-block" hidden></div>
-          <div id="live-status" class="status-block live-status" hidden></div>
-          <div id="steps-list" class="stack"></div>
+          <div class="validation-stage">
+            <div class="validation-main">
+              <div class="panel-header">
+                <h2>Validation steps</h2>
+                <p>Run each step manually. Open the dropdowns only when you want the low-level transport, workspace, or inference payloads.</p>
+              </div>
+              <div id="error-banner" class="status-block" hidden></div>
+              <div id="live-status" class="status-block live-status" hidden></div>
+              <div id="steps-list" class="stack"></div>
+            </div>
+            <aside class="validation-sidebar">
+              <div class="sidebar-card">
+                <h2>Running chat</h2>
+                <p>Each completed step appears here as a conversation turn. Pending OpenAI work stays visible while it is still running.</p>
+                <div id="conversation-stream" class="stack"></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="panel panel-wide">
+          <div class="panel-header">
+            <h2>What Next</h2>
+            <p>The local validation flow is now strong enough to move from UI polish into higher-confidence external proof.</p>
+          </div>
+          <div class="stack">
+            <article class="event-item">
+              <h3>1. Add real token streaming</h3>
+              <p>Today the page shows live phases, but not token-by-token model output. The next UI upgrade is a true streamed assistant response from the OpenAI call into the right-side chat panel.</p>
+            </article>
+            <article class="event-item">
+              <h3>2. Repeat the same flow for `git`</h3>
+              <p>After `filesystem`, validate the same transport and gateway thesis against a more realistic stateful target using repository operations.</p>
+            </article>
+            <article class="event-item">
+              <h3>3. Then validate `memory`</h3>
+              <p>Use the same conversation and lifecycle harness to stress reconnect, restart, TTL, and continuity behavior where session semantics matter most.</p>
+            </article>
+            <article class="event-item">
+              <h3>4. Move to multi-container proof</h3>
+              <p>Run client, gateway, and MCP servers as separate containers or hosts so the thesis is proven outside one local process boundary.</p>
+            </article>
+          </div>
         </section>
       </main>
     </div>
