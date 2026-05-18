@@ -25,6 +25,10 @@ const elements = {
   cleanupButton: document.querySelector("#cleanup-button"),
   errorBanner: document.querySelector("#error-banner"),
   liveStatus: document.querySelector("#live-status"),
+  stepModal: document.querySelector("#step-modal"),
+  stepModalTitle: document.querySelector("#step-modal-title"),
+  stepModalBody: document.querySelector("#step-modal-body"),
+  stepModalClose: document.querySelector("#step-modal-close"),
 };
 
 const PENDING_PHASES = [
@@ -67,6 +71,14 @@ function wireEvents() {
     clearPendingState();
     await postJson("/api/validation/cleanup", {});
     await refresh();
+  });
+  elements.stepModalClose.addEventListener("click", () => {
+    elements.stepModal.close();
+  });
+  elements.stepModal.addEventListener("click", (event) => {
+    if (event.target === elements.stepModal) {
+      elements.stepModal.close();
+    }
   });
 }
 
@@ -197,6 +209,7 @@ function renderConversationStream(scenario) {
     turns.length > 0
       ? turns.join("")
       : "<p>No conversation turns yet. Click <strong>Send step</strong> on the left to begin.</p>";
+  elements.conversationStream.scrollTop = elements.conversationStream.scrollHeight;
 }
 
 function renderSteps(scenario) {
@@ -253,6 +266,9 @@ function renderSteps(scenario) {
                     ]),
                     true,
                   )}
+                  <div class="controls">
+                    <button class="button" type="button" data-open-step-window="${escapeHtml(step.id)}">Open step window</button>
+                  </div>
                   ${
                     result.openaiToolCall
                       ? renderDisclosure(
@@ -305,6 +321,18 @@ function renderSteps(scenario) {
         clearPendingState();
         showError(error.message);
       }
+    });
+  }
+
+  for (const button of elements.stepsList.querySelectorAll("[data-open-step-window]")) {
+    button.addEventListener("click", () => {
+      const stepId = button.getAttribute("data-open-step-window");
+      const step = scenario.steps.find((candidate) => candidate.id === stepId);
+      const result = resultById.get(stepId);
+      if (!step || !result) {
+        return;
+      }
+      openStepWindow(scenario, step, result);
     });
   }
 }
@@ -421,6 +449,63 @@ function renderPendingBubble(streamedText) {
       </div>
     </div>
   `;
+}
+
+function openStepWindow(scenario, step, result) {
+  elements.stepModalTitle.textContent = `${step.title} details`;
+  elements.stepModalBody.innerHTML = `
+    <div class="chat-thread">
+      ${renderChatBubble("user", "Prompt sent", step.userPrompt)}
+      ${renderChatBubble("assistant", "Assistant summary", result.assistantSummary)}
+    </div>
+    ${renderDisclosure(
+      "What the browser sent",
+      renderKeyValueList([
+        ["Scenario id", scenario.id],
+        ["Step id", step.id],
+        ["Transport", step.transport],
+        ["Prompt", step.userPrompt],
+      ]),
+      true,
+    )}
+    ${
+      result.openaiToolCall
+        ? renderDisclosure(
+            "Inference and tool call",
+            `
+              ${renderKeyValueList([
+                ["Provider", result.provider || "n/a"],
+                ["Model", result.model || "n/a"],
+                ["Tool name", result.openaiToolCall.name],
+                ["Response id", result.openaiResponseId || "n/a"],
+              ])}
+              <pre>${escapeHtml(JSON.stringify(result.openaiToolCall.arguments, null, 2))}</pre>
+            `,
+          )
+        : ""
+    }
+    ${
+      result.outputs?.workspaceSnapshot
+        ? renderDisclosure(
+            "Workspace snapshot",
+            renderWorkspaceSnapshot(result.outputs.workspaceSnapshot),
+          )
+        : ""
+    }
+    ${
+      result.outputs?.storeSnapshot
+        ? renderDisclosure(
+            "Store snapshot",
+            `<pre>${escapeHtml(JSON.stringify(result.outputs.storeSnapshot, null, 2))}</pre>`,
+          )
+        : ""
+    }
+    ${renderDisclosure(
+      "Raw MCP and gateway output",
+      `<pre>${escapeHtml(JSON.stringify(result.outputs, null, 2))}</pre>`,
+    )}
+  `;
+  elements.stepModal.showModal();
 }
 
 function renderDisclosure(title, body, open = false) {

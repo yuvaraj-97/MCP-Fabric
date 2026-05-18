@@ -59,7 +59,7 @@
               <div class="sidebar-card">
                 <h2>Running chat</h2>
                 <p>Each completed step appears here as a conversation turn. Pending OpenAI work stays visible while it is still running.</p>
-                <div id="conversation-stream" class="stack"></div>
+                <div id="conversation-stream" class="stack conversation-scroll"></div>
               </div>
             </aside>
           </div>
@@ -91,6 +91,16 @@
         </section>
       </main>
     </div>
+
+    <dialog id="step-modal" class="step-modal">
+      <div class="step-modal-shell">
+        <div class="panel-header">
+          <h2 id="step-modal-title">Step details</h2>
+          <button id="step-modal-close" class="button button-ghost" type="button">Close</button>
+        </div>
+        <div id="step-modal-body" class="stack"></div>
+      </div>
+    </dialog>
 
     <script type="module" src="/validation.js"></script>
   </body>

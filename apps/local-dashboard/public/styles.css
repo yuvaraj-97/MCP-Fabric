@@ -202,6 +202,12 @@ body {
   margin: 0 0 14px;
 }
 
+.conversation-scroll {
+  max-height: 72vh;
+  overflow: auto;
+  padding-right: 6px;
+}
+
 .chat-thread,
 .conversation-turn {
   display: grid;
@@ -338,6 +344,30 @@ body {
 
 .workspace-item p + p {
   margin-top: 4px;
+}
+
+.step-modal {
+  width: min(960px, calc(100vw - 32px));
+  max-height: min(88vh, 960px);
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: transparent;
+}
+
+.step-modal::backdrop {
+  background: rgba(18, 24, 27, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.step-modal-shell {
+  overflow: auto;
+  max-height: 88vh;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid var(--edge);
+  background: rgba(255, 251, 246, 0.98);
+  box-shadow: 0 30px 80px rgba(31, 42, 44, 0.22);
 }
 
 pre {
