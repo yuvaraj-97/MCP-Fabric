@@ -103,7 +103,7 @@ function render() {
   renderSimpleList(elements.codeAddedList, dashboard.codeAdded);
   renderSimpleList(elements.testProofList, dashboard.testProof);
   renderWalkthrough(dashboard.walkthrough);
-  renderSummary(snapshot.summary);
+  renderSummary(snapshot.summary, snapshot.operatorConfig);
   renderInstances(snapshot.instances, snapshot.loadThreshold);
   renderSessions(snapshot.sessions);
   renderRuntime(snapshot.runtime);
@@ -144,12 +144,14 @@ function renderSimpleList(target, items) {
   target.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
-function renderSummary(summary) {
+function renderSummary(summary, operatorConfig) {
   const cards = [
     { label: "Instances", value: summary.totalInstances },
     { label: "Healthy", value: summary.healthyInstances },
     { label: "Over threshold", value: summary.overloadedInstances },
     { label: "Active sessions", value: summary.activeSessions },
+    { label: "Max load", value: operatorConfig.loadThreshold.toFixed(2) },
+    { label: "Default fleet", value: operatorConfig.serverCount },
   ];
 
   elements.summaryStrip.innerHTML = cards
@@ -289,6 +291,7 @@ function renderRuntime(runtime) {
     { label: "Latest runtime session", value: runtime.latestSessionId ?? "none" },
     { label: "Registry mode", value: runtime.registry.mode },
     { label: "Durable", value: runtime.registry.durable ? "yes" : "no" },
+    { label: "Max load", value: runtime.registry.loadThreshold.toFixed(2) },
     { label: "Session TTL", value: formatDuration(runtime.registry.sessionTtlMs) },
     { label: "Reconnect grace", value: formatDuration(runtime.registry.reconnectGracePeriodMs) },
   ];

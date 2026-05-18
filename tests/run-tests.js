@@ -1,3 +1,4 @@
+import "./gateway/operator-config.test.js";
 import "./session-routing/memory-session-registry.test.js";
 import "./session-routing/file-session-registry.test.js";
 import "./session-routing/load-router.test.js";

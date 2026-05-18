@@ -190,6 +190,21 @@ test("gateway controller requires reinitialize after the session TTL expires", a
   );
 });
 
+test("gateway controller exposes operator-configured lifecycle policy values", () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: {
+      loadThreshold: 0.75,
+      sessionTtlMs: 90_000,
+      reconnectGracePeriodMs: 12_000,
+    },
+  });
+
+  const registry = controller.describeRegistry();
+  assert.equal(registry.loadThreshold, 0.75);
+  assert.equal(registry.sessionTtlMs, 90_000);
+  assert.equal(registry.reconnectGracePeriodMs, 12_000);
+});
+
 function createEventCollector() {
   return {
     chunks: [],

@@ -3,14 +3,23 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  DEFAULT_DASHBOARD_OPERATOR_CONFIG,
+  operatorConfigFromEnv,
+} from "../../packages/gateway/config/operator-config.js";
 import { LocalDemoController } from "../../packages/gateway/demo/local-demo-controller.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-export function createDashboardServer({ port = Number(process.env.PORT || 4321) } = {}) {
-  const controller = new LocalDemoController();
+export function createDashboardServer({
+  operatorConfig = operatorConfigFromEnv({
+    defaults: DEFAULT_DASHBOARD_OPERATOR_CONFIG,
+  }),
+  port = operatorConfig.port,
+} = {}) {
+  const controller = new LocalDemoController({ operatorConfig });
   const handler = createDashboardHandler({ controller });
 
   const server = createServer(handler);
@@ -40,7 +49,12 @@ export function createDashboardServer({ port = Number(process.env.PORT || 4321) 
   };
 }
 
-export function createDashboardHandler({ controller = new LocalDemoController() } = {}) {
+export function createDashboardHandler({
+  operatorConfig = operatorConfigFromEnv({
+    defaults: DEFAULT_DASHBOARD_OPERATOR_CONFIG,
+  }),
+  controller = new LocalDemoController({ operatorConfig }),
+} = {}) {
   return async (request, response) => {
     try {
       const url = new URL(request.url, `http://${request.headers.host || "127.0.0.1"}`);
@@ -158,7 +172,8 @@ function contentTypeFor(filePath) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const dashboard = createDashboardServer();
   dashboard.start().then((address) => {
-    const effectivePort = typeof address === "object" && address ? address.port : process.env.PORT || 4321;
+    const effectivePort =
+      typeof address === "object" && address ? address.port : DEFAULT_DASHBOARD_OPERATOR_CONFIG.port;
     console.log(`Local MCP dashboard running at http://127.0.0.1:${effectivePort}`);
   });
 }

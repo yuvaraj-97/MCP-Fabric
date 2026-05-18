@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 
 import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-application-server.js";
+import { DEFAULT_GATEWAY_OPERATOR_CONFIG, resolveOperatorConfig } from "../../gateway/config/operator-config.js";
 import { LoadRouter } from "../../gateway/load-balancer/load-router.js";
 import { MemorySessionRegistry } from "../../gateway/session-registry/memory-session-registry.js";
 
@@ -10,18 +11,25 @@ export function createHttpSseGatewayServer({
     { serverInstanceId: "server-a", load: 0.2, healthy: true, acceptingNewSessions: true },
     { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
   ],
-  loadThreshold = 0.7,
+  operatorConfig,
+  loadThreshold,
   sessionRegistry,
-  sessionTtlMs = 5 * 60 * 1000,
-  reconnectGracePeriodMs = 30 * 1000,
+  sessionTtlMs,
+  reconnectGracePeriodMs,
   now = () => Date.now(),
 } = {}) {
+  const resolvedOperatorConfig = resolveOperatorConfig({
+    config: mergeExplicitOperatorConfig(operatorConfig, {
+      loadThreshold,
+      sessionTtlMs,
+      reconnectGracePeriodMs,
+    }),
+    defaults: DEFAULT_GATEWAY_OPERATOR_CONFIG,
+  });
   const controller = createHttpSseGatewayController({
     serverInstances,
-    loadThreshold,
+    operatorConfig: resolvedOperatorConfig,
     sessionRegistry,
-    sessionTtlMs,
-    reconnectGracePeriodMs,
     now,
   });
   const server = createServer(createGatewayHttpHandler({ controller }));
@@ -141,14 +149,31 @@ export function createHttpSseGatewayController({
     { serverInstanceId: "server-a", load: 0.2, healthy: true, acceptingNewSessions: true },
     { serverInstanceId: "server-b", load: 0.4, healthy: true, acceptingNewSessions: true },
   ],
-  loadThreshold = 0.7,
+  operatorConfig,
+  loadThreshold,
   sessionRegistry,
-  sessionTtlMs = 5 * 60 * 1000,
-  reconnectGracePeriodMs = 30 * 1000,
+  sessionTtlMs,
+  reconnectGracePeriodMs,
   now = () => Date.now(),
 } = {}) {
+  const resolvedOperatorConfig = resolveOperatorConfig({
+    config: mergeExplicitOperatorConfig(operatorConfig, {
+      loadThreshold,
+      sessionTtlMs,
+      reconnectGracePeriodMs,
+    }),
+    defaults: DEFAULT_GATEWAY_OPERATOR_CONFIG,
+  });
+  const {
+    loadThreshold: effectiveLoadThreshold,
+    sessionTtlMs: effectiveSessionTtlMs,
+    reconnectGracePeriodMs: effectiveReconnectGracePeriodMs,
+  } = resolvedOperatorConfig;
   const resolvedSessionRegistry = sessionRegistry ?? new MemorySessionRegistry({ now });
-  const router = new LoadRouter({ sessionRegistry: resolvedSessionRegistry, loadThreshold });
+  const router = new LoadRouter({
+    sessionRegistry: resolvedSessionRegistry,
+    loadThreshold: effectiveLoadThreshold,
+  });
   const applications = new Map();
   const eventStreams = new Map();
 
@@ -174,8 +199,9 @@ export function createHttpSseGatewayController({
           typeof resolvedSessionRegistry.isDurable === "function"
             ? resolvedSessionRegistry.isDurable()
             : false,
-        sessionTtlMs,
-        reconnectGracePeriodMs,
+        loadThreshold: effectiveLoadThreshold,
+        sessionTtlMs: effectiveSessionTtlMs,
+        reconnectGracePeriodMs: effectiveReconnectGracePeriodMs,
         filePath:
           typeof resolvedSessionRegistry.filePath === "function"
             ? resolvedSessionRegistry.filePath()
@@ -218,7 +244,7 @@ export function createHttpSseGatewayController({
       removeEventStream(eventStreams, sessionId, response);
       if (!hasActiveEventStream(eventStreams, sessionId)) {
         resolvedSessionRegistry.markDisconnected?.(sessionId, {
-          gracePeriodMs: reconnectGracePeriodMs,
+          gracePeriodMs: effectiveReconnectGracePeriodMs,
         });
       }
     },
@@ -317,7 +343,7 @@ export function createHttpSseGatewayController({
           existingRecord: existingSessionRecord,
           clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
           now: requestNow,
-          sessionTtlMs,
+          sessionTtlMs: effectiveSessionTtlMs,
         }),
       );
 
@@ -507,6 +533,17 @@ function createGatewaySessionError({ sessionId, code, statusCode, message }) {
   error.code = code;
   error.statusCode = statusCode;
   return error;
+}
+
+function mergeExplicitOperatorConfig(baseConfig = {}, overrides = {}) {
+  const merged = { ...baseConfig };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
 }
 
 function renderInspectorHtml() {

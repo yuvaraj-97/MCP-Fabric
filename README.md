@@ -117,6 +117,27 @@ The implemented slices today are:
 External production-grade state backends, operator-friendly policy controls, and
 fuller gateway packaging are still the next recommended build steps.
 
+## Operator Configuration
+
+The local dashboard and HTTP/SSE gateway now support basic operator-oriented
+configuration through environment variables:
+
+- `PORT`
+- `MCP_GATEWAY_DEFAULT_SERVER_COUNT`
+- `MCP_GATEWAY_LOAD_THRESHOLD`
+- `MCP_GATEWAY_SESSION_TTL_MS`
+- `MCP_GATEWAY_RECONNECT_GRACE_MS`
+
+Example:
+
+```sh
+MCP_GATEWAY_DEFAULT_SERVER_COUNT=4 \
+MCP_GATEWAY_LOAD_THRESHOLD=0.75 \
+MCP_GATEWAY_SESSION_TTL_MS=90000 \
+MCP_GATEWAY_RECONNECT_GRACE_MS=12000 \
+npm run demo
+```
+
 ## Recommended Path
 
 Build the reusable library core first, then build the self-hosted gateway on

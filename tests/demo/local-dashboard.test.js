@@ -55,14 +55,17 @@ test("dashboard handler serves the UI shell and live state", async () => {
   assert.equal(stateResponse.statusCode, 200);
   const state = JSON.parse(stateResponse.body);
   assert.equal(state.dashboard.title, "MCP Scaling Demo Dashboard");
+  assert.equal(state.operatorConfig.serverCount, 3);
+  assert.equal(state.operatorConfig.loadThreshold, 0.7);
   assert.equal(state.instances.length, 3);
   assert.equal(state.runtime.instances.length, 3);
   assert.equal(state.runtime.registry.mode, "file");
   assert.equal(state.runtime.registry.durable, true);
+  assert.equal(state.runtime.registry.loadThreshold, 0.7);
   assert.equal(state.runtime.registry.sessionTtlMs, 60_000);
   assert.equal(state.runtime.registry.reconnectGracePeriodMs, 15_000);
   assert.match(state.dashboard.status.implemented, /HTTP\/SSE gateway/);
-  assert.match(state.dashboard.status.planned, /operator policy controls/);
+  assert.match(state.dashboard.status.planned, /operator workflows and observability/);
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("mcp-application-server.js")));
   assert.ok(state.dashboard.codeAdded.some((item) => item.includes("demo-application-server.js")));
   assert.ok(state.dashboard.testProof.some((item) => item.includes("Transport-agnostic tests")));
@@ -84,6 +87,26 @@ test("local demo controller exposes the reusable-core milestone copy", () => {
   assert.ok(
     state.dashboard.codeAdded.some((item) => item.includes("stdio transport adapter")),
   );
+});
+
+test("local demo controller honors custom operator config defaults", () => {
+  const controller = new LocalDemoController({
+    operatorConfig: {
+      serverCount: 4,
+      loadThreshold: 0.75,
+      sessionTtlMs: 90_000,
+      reconnectGracePeriodMs: 12_000,
+    },
+  });
+  const state = controller.getState();
+
+  assert.equal(state.operatorConfig.serverCount, 4);
+  assert.equal(state.operatorConfig.loadThreshold, 0.75);
+  assert.equal(state.instances.length, 4);
+  assert.equal(state.runtime.instances.length, 4);
+  assert.equal(state.runtime.registry.loadThreshold, 0.75);
+  assert.equal(state.runtime.registry.sessionTtlMs, 90_000);
+  assert.equal(state.runtime.registry.reconnectGracePeriodMs, 12_000);
 });
 
 test("dashboard handler can create and use a real in-process runtime session", async () => {

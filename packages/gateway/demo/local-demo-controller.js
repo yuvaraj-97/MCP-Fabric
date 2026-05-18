@@ -1,18 +1,18 @@
 import { LoadRouter } from "../load-balancer/load-router.js";
+import {
+  createDemoServerInstances,
+  DEFAULT_DASHBOARD_OPERATOR_CONFIG,
+  resolveOperatorConfig,
+} from "../config/operator-config.js";
 import { FileSessionRegistry, removeRegistryFile } from "../session-registry/file-session-registry.js";
 import { MemorySessionRegistry } from "../session-registry/memory-session-registry.js";
 import { createHttpSseGatewayController } from "../../transports/http-sse/gateway-server.js";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-const DEFAULT_LOAD_THRESHOLD = 0.7;
-const DEFAULT_RUNTIME_SESSION_TTL_MS = 60_000;
-const DEFAULT_RUNTIME_RECONNECT_GRACE_MS = 15_000;
-const DEFAULT_INSTANCES = [
-  { serverInstanceId: "server-a", healthy: true, load: 0.22, acceptingNewSessions: true },
-  { serverInstanceId: "server-b", healthy: true, load: 0.48, acceptingNewSessions: true },
-  { serverInstanceId: "server-c", healthy: true, load: 0.82, acceptingNewSessions: true },
-];
+const DEFAULT_INSTANCES = createDemoServerInstances({
+  serverCount: DEFAULT_DASHBOARD_OPERATOR_CONFIG.serverCount,
+});
 
 const DASHBOARD_COPY = {
   title: "MCP Scaling Demo Dashboard",
@@ -44,7 +44,7 @@ const DASHBOARD_COPY = {
     implemented:
       "Today the repo has a reusable MCP core, a session context helper, a framed stdio adapter, a newline stdio demo harness, an HTTP/SSE gateway, a durable file-backed runtime session registry, explicit restart and reconnect recovery behavior, session TTL plus reconnect grace-window enforcement, a load-aware router, and this local dashboard.",
     planned:
-      "Next comes external production-grade state backends, clearer operator policy controls for TTL and reconnect rules, and fuller self-hosted gateway packaging for real MCP deployments.",
+      "Next comes external production-grade state backends, fuller operator workflows and observability, and clearer self-hosted gateway packaging for real MCP deployments.",
   },
   improvements: [
     {
@@ -66,6 +66,7 @@ const DASHBOARD_COPY = {
     "packages/transports/http-sse/gateway-server.js now provides a sticky-session HTTP/SSE gateway with an inspector and SSE event streaming.",
     "packages/gateway/session-registry/file-session-registry.js now provides durable file-backed session persistence for restart and reconnect flows.",
     "packages/gateway/session-registry/*.js now track session expiry, disconnect state, and reconnect grace metadata.",
+    "packages/gateway/config/operator-config.js now centralizes operator-facing policy defaults and environment-driven overrides.",
     "examples/shared/scaling-demo-server.js, examples/stdio-server/server.js, and examples/http-sse-server/server.js prove the transports can be exercised locally.",
     "packages/gateway/demo/local-demo-controller.js simulates fake MCP instances, sessions, and decision logs.",
     "apps/local-dashboard/server.js serves the local dashboard and JSON API.",
@@ -108,23 +109,25 @@ export class LocalDemoController {
   #runtimeEvents = [];
   #runtimeRegistryPath;
   #runtimeInstances = [];
-  #runtimeSessionTtlMs;
-  #runtimeReconnectGraceMs;
+  #operatorConfig;
 
   constructor({
-    loadThreshold = DEFAULT_LOAD_THRESHOLD,
-    initialInstances = DEFAULT_INSTANCES,
+    operatorConfig,
+    loadThreshold,
+    initialInstances,
     runtimeRegistryPath,
   } = {}) {
-    if (typeof loadThreshold !== "number" || loadThreshold < 0 || loadThreshold > 1) {
-      throw new RangeError("loadThreshold must be a number between 0 and 1");
-    }
-
-    this.#loadThreshold = loadThreshold;
+    this.#operatorConfig = resolveOperatorConfig({
+      defaults: DEFAULT_DASHBOARD_OPERATOR_CONFIG,
+      config: mergeExplicitOperatorConfig(operatorConfig, {
+        loadThreshold,
+      }),
+    });
+    this.#loadThreshold = this.#operatorConfig.loadThreshold;
     this.#runtimeRegistryPath = runtimeRegistryPath ?? join("/tmp", `mcp-dashboard-registry-${randomUUID()}.json`);
-    this.#runtimeSessionTtlMs = DEFAULT_RUNTIME_SESSION_TTL_MS;
-    this.#runtimeReconnectGraceMs = DEFAULT_RUNTIME_RECONNECT_GRACE_MS;
-    this.reset(initialInstances);
+    this.reset(initialInstances ?? createDemoServerInstances({
+      serverCount: this.#operatorConfig.serverCount,
+    }));
   }
 
   reset(initialInstances = DEFAULT_INSTANCES) {
@@ -164,6 +167,7 @@ export class LocalDemoController {
 
     return {
       dashboard: DASHBOARD_COPY,
+      operatorConfig: { ...this.#operatorConfig },
       loadThreshold: this.#loadThreshold,
       instances,
       sessions,
@@ -295,7 +299,7 @@ export class LocalDemoController {
       this.#runtimeCollectors.delete(normalizedSessionId);
     } else {
       this.#runtimeController.sessionRegistry.markDisconnected?.(normalizedSessionId, {
-        gracePeriodMs: this.#runtimeReconnectGraceMs,
+        gracePeriodMs: this.#operatorConfig.reconnectGracePeriodMs,
       });
     }
 
@@ -386,6 +390,7 @@ export class LocalDemoController {
       events: this.#runtimeEvents.map((event) => ({ ...event })),
       latestSessionId: sessions.at(-1)?.sessionId ?? null,
       registry: this.#runtimeController.describeRegistry(),
+      operatorConfig: { ...this.#operatorConfig },
     };
   }
 
@@ -429,12 +434,10 @@ export class LocalDemoController {
   #buildRuntimeController() {
     return createHttpSseGatewayController({
       serverInstances: this.#runtimeInstances,
-      loadThreshold: this.#loadThreshold,
+      operatorConfig: this.#operatorConfig,
       sessionRegistry: new FileSessionRegistry({
         filePath: this.#runtimeRegistryPath,
       }),
-      sessionTtlMs: this.#runtimeSessionTtlMs,
-      reconnectGracePeriodMs: this.#runtimeReconnectGraceMs,
     });
   }
 }
@@ -524,4 +527,15 @@ function flattenRuntimeEventDetails(event) {
 
     return `${key} = ${String(value)}`;
   });
+}
+
+function mergeExplicitOperatorConfig(baseConfig = {}, overrides = {}) {
+  const merged = { ...baseConfig };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
 }

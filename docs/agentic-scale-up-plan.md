@@ -125,6 +125,8 @@ slice plus transport-specific runtime demos.
   provides an in-memory `session_id -> server_instance_id` registry.
 - [`packages/gateway/load-balancer/load-router.js`](../packages/gateway/load-balancer/load-router.js)
   provides load-aware routing and sticky existing-session behavior.
+- [`packages/gateway/config/operator-config.js`](../packages/gateway/config/operator-config.js)
+  provides basic operator-facing defaults and environment-driven policy overrides.
 - Example runtimes now exist for:
   - [`examples/stdio-server/server.js`](../examples/stdio-server/server.js)
   - [`examples/http-sse-server/server.js`](../examples/http-sse-server/server.js)
@@ -161,8 +163,7 @@ Missing pieces:
 - cleaner unification between the reusable MCP core and the newer demo/gateway
   path
 - production-grade durable session registry backends beyond the local file-backed prototype
-- operator-friendly controls around TTL, reconnect grace windows, and restart policy defaults
-- simple operator configuration defaults (e.g., `servers=3, max_load=0.75`) for easier setup
+- fuller operator workflows around TTL, reconnect grace windows, restart policy defaults, and observability
 - health/load reporting model for real instances
 - more complete observability and operator workflows
 - packaged standalone gateway runtime
