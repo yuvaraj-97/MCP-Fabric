@@ -1,6 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { Writable } from "node:stream";
 
 import { createFilesystemValidationApplication } from "../../examples/shared/filesystem-validation-server.js";
@@ -9,10 +7,15 @@ import {
   createHttpSseGatewayController,
 } from "../../packages/transports/http-sse/gateway-server.js";
 import { StdioTransportAdapter } from "../../packages/transports/stdio/stdio-transport.js";
+import {
+  createFilesystemValidationWorkspace,
+  describeFilesystemValidationFile,
+  snapshotFilesystemValidationWorkspace,
+} from "./workspace.js";
 
 export async function runFilesystemValidation({
-  rootDir = mkdtempSync(join(tmpdir(), "mcp-filesystem-validation-")),
-  cleanup = true,
+  rootDir = createFilesystemValidationWorkspace("filesystem-headless"),
+  cleanup = false,
 } = {}) {
   try {
     const stdioServer = createFilesystemValidationApplication({
@@ -110,6 +113,8 @@ export async function runFilesystemValidation({
     return {
       ok: true,
       rootDir,
+      createdFile: describeFilesystemValidationFile(rootDir),
+      workspaceSnapshot: snapshotFilesystemValidationWorkspace(rootDir),
       stdio: {
         initialize: stdioInitialize,
         toolNames: stdioTools.result.tools.map((tool) => tool.name).sort(),

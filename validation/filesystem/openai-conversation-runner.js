@@ -34,6 +34,7 @@ export class OpenAIFilesystemConversationRunner {
       audience:
         "Uses the OpenAI API to generate assistant replies while the real validation actions still run through the shared stdio and gateway-backed HTTP/SSE transports.",
       rootDir: this.#baseRunner.getState().rootDir,
+      createdFile: this.#baseRunner.getState().createdFile,
       provider: {
         name: "OpenAI Responses API",
         model: process.env.OPENAI_MODEL || "gpt-5",

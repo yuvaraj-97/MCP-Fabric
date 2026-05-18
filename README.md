@@ -277,6 +277,14 @@ This uses `OPENAI_API_KEY` from the environment or `.env`, calls the OpenAI
 Responses API, and requires the model to invoke a validation tool for each
 conversation step before it replies in plain English.
 
+The validation file is written into a repo-local workspace so you can inspect it
+directly after a run:
+
+```text
+validation-artifacts/filesystem-conversation/notes/hello.txt
+validation-artifacts/filesystem-headless/notes/hello.txt
+```
+
 ## Laptop Walkthrough Page
 
 Run:

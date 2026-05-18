@@ -1,6 +1,13 @@
 const state = {
   scenarios: [],
   selectedScenarioId: "filesystem-conversation",
+  pendingStepId: null,
+  pendingScenarioId: null,
+  pendingStatusIndex: 0,
+  pendingStartedAt: 0,
+  pendingElapsedLabel: "0.0s",
+  pendingTicker: null,
+  pendingPhaseTicker: null,
 };
 
 const elements = {
@@ -9,7 +16,16 @@ const elements = {
   refreshButton: document.querySelector("#refresh-button"),
   resetButton: document.querySelector("#reset-button"),
   errorBanner: document.querySelector("#error-banner"),
+  liveStatus: document.querySelector("#live-status"),
 };
+
+const PENDING_PHASES = [
+  "Request sent from the browser to the local validation server.",
+  "Validation runner is preparing the transport-specific action.",
+  "If this is the OpenAI scenario, the model is deciding which validation tool to call.",
+  "The real MCP validation step is executing through stdio or the HTTP/SSE gateway.",
+  "Waiting for the assistant summary and final result payload.",
+];
 
 boot();
 
@@ -21,6 +37,7 @@ async function boot() {
 function wireEvents() {
   elements.refreshButton.addEventListener("click", refresh);
   elements.resetButton.addEventListener("click", async () => {
+    clearPendingState();
     await postJson("/api/validation/reset", {
       scenarioId: state.selectedScenarioId,
     });
@@ -48,6 +65,7 @@ function render() {
   }
 
   renderScenarios(selectedScenario);
+  renderLiveStatus(selectedScenario);
   renderSteps(selectedScenario);
 }
 
@@ -60,6 +78,11 @@ function renderScenarios(selectedScenario) {
           <p>${escapeHtml(scenario.audience)}</p>
           <p><strong>Scenario id:</strong> <span class="mono">${escapeHtml(scenario.id)}</span></p>
           <p><strong>Workspace:</strong> <span class="mono">${escapeHtml(scenario.rootDir)}</span></p>
+          ${
+            scenario.createdFile
+              ? `<p><strong>Expected file:</strong> <span class="mono">${escapeHtml(scenario.createdFile.absolutePath)}</span></p>`
+              : ""
+          }
           <p><strong>Completed steps:</strong> ${scenario.results.length}/${scenario.steps.length}</p>
           <p><strong>Availability:</strong> ${
             scenario.available === false
@@ -97,6 +120,8 @@ function renderSteps(scenario) {
   elements.stepsList.innerHTML = scenario.steps
     .map((step, index) => {
       const result = resultById.get(step.id);
+      const isPending =
+        state.pendingScenarioId === scenario.id && state.pendingStepId === step.id;
       return `
         <article class="event-item">
           <h3>Step ${index + 1}: ${escapeHtml(step.title)}</h3>
@@ -106,9 +131,21 @@ function renderSteps(scenario) {
           <p><strong>Expected result:</strong> ${escapeHtml(step.expected)}</p>
           <div class="controls">
             <button class="button button-primary" data-run-step="${escapeHtml(step.id)}" ${
-              scenario.available === false ? "disabled" : ""
-            }>Send step</button>
+              scenario.available === false || state.pendingStepId ? "disabled" : ""
+            }>${isPending ? "Running..." : "Send step"}</button>
           </div>
+          ${
+            isPending
+              ? `
+                <div class="status-block status-pending">
+                  <h3>Live progress</h3>
+                  <p><strong>Current phase:</strong> ${escapeHtml(currentPendingPhase())}</p>
+                  <p><strong>Elapsed:</strong> ${escapeHtml(state.pendingElapsedLabel)}</p>
+                  <p><strong>Prompt sent:</strong> ${escapeHtml(step.userPrompt)}</p>
+                </div>
+              `
+              : ""
+          }
           ${
             result
               ? `
@@ -132,16 +169,44 @@ function renderSteps(scenario) {
     button.addEventListener("click", async () => {
       try {
         hideError();
+        beginPendingState(state.selectedScenarioId, button.getAttribute("data-run-step"));
         await postJson("/api/validation/step", {
           scenarioId: state.selectedScenarioId,
           stepId: button.getAttribute("data-run-step"),
         });
+        clearPendingState();
         await refresh();
       } catch (error) {
+        clearPendingState();
         showError(error.message);
       }
     });
   }
+}
+
+function renderLiveStatus(scenario) {
+  if (!state.pendingStepId || state.pendingScenarioId !== scenario?.id) {
+    elements.liveStatus.hidden = true;
+    elements.liveStatus.innerHTML = "";
+    return;
+  }
+
+  const step = scenario.steps.find((candidate) => candidate.id === state.pendingStepId);
+  if (!step) {
+    elements.liveStatus.hidden = true;
+    elements.liveStatus.innerHTML = "";
+    return;
+  }
+
+  elements.liveStatus.hidden = false;
+  elements.liveStatus.innerHTML = `
+    <h3>Validation request in progress</h3>
+    <p><strong>Scenario:</strong> ${escapeHtml(scenario.title)}</p>
+    <p><strong>Step:</strong> ${escapeHtml(step.title)}</p>
+    <p><strong>Status:</strong> ${escapeHtml(currentPendingPhase())}</p>
+    <p><strong>Elapsed:</strong> ${escapeHtml(state.pendingElapsedLabel)}</p>
+    <p><strong>Prompt already sent:</strong> ${escapeHtml(step.userPrompt)}</p>
+  `;
 }
 
 async function fetchJson(url, options) {
@@ -179,4 +244,45 @@ function showError(message) {
 function hideError() {
   elements.errorBanner.hidden = true;
   elements.errorBanner.innerHTML = "";
+}
+
+function beginPendingState(scenarioId, stepId) {
+  clearPendingState();
+  state.pendingScenarioId = scenarioId;
+  state.pendingStepId = stepId;
+  state.pendingStatusIndex = 0;
+  state.pendingStartedAt = Date.now();
+  state.pendingElapsedLabel = "0.0s";
+  state.pendingTicker = window.setInterval(() => {
+    state.pendingElapsedLabel = `${((Date.now() - state.pendingStartedAt) / 1000).toFixed(1)}s`;
+    render();
+  }, 120);
+  state.pendingPhaseTicker = window.setInterval(() => {
+    state.pendingStatusIndex = Math.min(
+      state.pendingStatusIndex + 1,
+      PENDING_PHASES.length - 1,
+    );
+    render();
+  }, 1800);
+  render();
+}
+
+function clearPendingState() {
+  if (state.pendingTicker) {
+    window.clearInterval(state.pendingTicker);
+  }
+  if (state.pendingPhaseTicker) {
+    window.clearInterval(state.pendingPhaseTicker);
+  }
+  state.pendingTicker = null;
+  state.pendingPhaseTicker = null;
+  state.pendingStepId = null;
+  state.pendingScenarioId = null;
+  state.pendingStatusIndex = 0;
+  state.pendingStartedAt = 0;
+  state.pendingElapsedLabel = "0.0s";
+}
+
+function currentPendingPhase() {
+  return PENDING_PHASES[state.pendingStatusIndex] || PENDING_PHASES[0];
 }

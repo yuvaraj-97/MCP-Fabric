@@ -154,6 +154,20 @@ body {
   margin-top: 16px;
 }
 
+.live-status,
+.status-pending {
+  border-radius: 18px;
+  border: 1px solid rgba(15, 118, 110, 0.25);
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.75));
+  padding: 16px;
+}
+
+.live-status h3,
+.status-pending h3 {
+  margin: 0 0 10px;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;

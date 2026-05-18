@@ -1,6 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { Writable } from "node:stream";
 
 import { createFilesystemValidationApplication } from "../../examples/shared/filesystem-validation-server.js";
@@ -9,6 +7,11 @@ import {
   createHttpSseGatewayController,
 } from "../../packages/transports/http-sse/gateway-server.js";
 import { StdioTransportAdapter } from "../../packages/transports/stdio/stdio-transport.js";
+import {
+  createFilesystemValidationWorkspace,
+  describeFilesystemValidationFile,
+  snapshotFilesystemValidationWorkspace,
+} from "./workspace.js";
 
 export class FilesystemConversationRunner {
   #rootDir;
@@ -23,7 +26,7 @@ export class FilesystemConversationRunner {
 
   reset() {
     this.#cleanup();
-    this.#rootDir = mkdtempSync(join(tmpdir(), "mcp-filesystem-conversation-"));
+    this.#rootDir = createFilesystemValidationWorkspace("filesystem-conversation");
     this.#state = {
       stdioSessionId: null,
       httpSessionId: null,
@@ -79,6 +82,7 @@ export class FilesystemConversationRunner {
     return {
       ...description,
       rootDir: this.#rootDir,
+      createdFile: describeFilesystemValidationFile(this.#rootDir),
       observability: this.#httpController.describeObservability(),
       results: description.steps
         .filter((step) => this.#state.stepResults.has(step.id))
@@ -101,6 +105,10 @@ export class FilesystemConversationRunner {
       whatTesting: step.whatTesting,
       expected: step.expected,
       ...result,
+      outputs: {
+        ...(result.outputs || {}),
+        workspaceSnapshot: snapshotFilesystemValidationWorkspace(this.#rootDir),
+      },
     };
     this.#state.stepResults.set(step.id, record);
     return {
