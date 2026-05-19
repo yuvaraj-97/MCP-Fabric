@@ -223,6 +223,7 @@ Use the other demos when you want a narrower transport-specific deep dive.
 | Multi-instance gateway demo | `npm run demo:multi` | `3001` | Inspect sticky routing and failover across multiple instances |
 | Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
 | Filesystem validation harness | `npm run validate:filesystem` | none | Headless validation of the same filesystem-style MCP app over `stdio` and gateway-backed HTTP/SSE |
+| Filesystem multi-container proof | `npm run validate:filesystem:multicontainer` | dynamic local ports | Canonical headless proof against a real HTTP gateway process with separate remote MCP server processes |
 | Filesystem conversation validation | `npm run validate:filesystem:conversation` | none | Headless scripted conversation proving the same app behavior over `stdio` and gateway-backed HTTP/SSE |
 | Filesystem OpenAI conversation validation | `npm run validate:filesystem:openai` | none | Headless tool-calling OpenAI conversation using the same validation workload |
 
@@ -251,6 +252,53 @@ This is the first target in the real-world validation order:
 1. `filesystem`
 2. `git`
 3. `memory`
+
+## Run Filesystem Multi-Container Proof
+
+```sh
+npm run validate:filesystem:multicontainer
+```
+
+This headless remote proof starts:
+
+- one client process
+- one HTTP gateway process
+- two remote filesystem MCP server processes
+
+Then it verifies:
+
+- sticky routing on the same session
+- unhealthy-instance reassignment
+- file artifact visibility through MCP calls
+- direct shared-workspace visibility across the remote server topology
+
+The created artifact path is:
+
+```text
+validation-artifacts/filesystem-multicontainer/notes/multicontainer-proof.txt
+```
+
+If you already have a gateway and remote servers running on separate hosts or
+containers, point the client proof at them instead of spawning local processes:
+
+```sh
+MCP_MULTICONTAINER_GATEWAY_URL=http://gateway-host:4200 \
+MCP_MULTICONTAINER_SERVER_URLS=fs-a=http://server-a:4101,fs-b=http://server-b:4102 \
+MCP_MULTICONTAINER_KEEP_ARTIFACTS=1 \
+npm run validate:filesystem:multicontainer
+```
+
+For a Docker-based version of the same topology, run:
+
+```sh
+docker compose -f validation/multicontainer/compose.yaml up --abort-on-container-exit client
+```
+
+Treat `validation/multicontainer/` as the single proof directory for this
+workflow. It contains the harness, remote runtime entrypoints, compose file,
+and operator instructions:
+
+- [validation/multicontainer/README.md](./validation/multicontainer/README.md)
 
 ## Run Filesystem Conversation Validation
 

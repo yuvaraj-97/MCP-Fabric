@@ -140,6 +140,60 @@ This plan assumes you may not have a browser available.
 - drive the flow with CLI scripts or test harnesses
 - inspect logs, JSON responses, and session-registry state directly
 
+### Current filesystem-first remote proof
+
+The repo now includes a headless filesystem proof that drives a real HTTP
+gateway against separate remote MCP server processes.
+
+Run it locally with:
+
+```sh
+npm run validate:filesystem:multicontainer
+```
+
+That command starts:
+
+- one client process
+- one gateway process
+- two remote filesystem MCP server processes
+
+It verifies:
+
+- sticky routing for an existing session
+- unhealthy-instance reassignment
+- visible filesystem artifacts through MCP calls
+- visible filesystem artifacts in shared workspace snapshots across the remote servers
+
+Created artifact:
+
+```text
+validation-artifacts/filesystem-multicontainer/notes/multicontainer-proof.txt
+```
+
+The proof report includes:
+
+- gateway base URL
+- remote server base URLs
+- MCP initialize and tool-call results
+- gateway `/sessions` and `/observability` snapshots
+- direct `/workspace` snapshots from the remote servers
+
+The same client script can also target a separately deployed gateway and server
+fleet by setting:
+
+- `MCP_MULTICONTAINER_GATEWAY_URL`
+- `MCP_MULTICONTAINER_SERVER_URLS`
+
+For a Docker-based topology, use:
+
+```sh
+docker compose -f validation/multicontainer/compose.yaml up --abort-on-container-exit client
+```
+
+Treat `validation/multicontainer/` as the canonical proof implementation. That
+directory contains the harness, runtime entrypoints, compose file, and
+operator-facing instructions for the filesystem-first remote proof.
+
 ### Laptop-friendly first pass
 
 Before moving to containers or separate hosts, the same validation flow should
@@ -153,6 +207,18 @@ npm run validate:filesystem
 
 That command validates the first target locally through both transports without
 requiring a browser.
+
+Current remote-proof command:
+
+```sh
+npm run validate:filesystem:multicontainer
+```
+
+That command proves the filesystem workload through:
+
+- a separate gateway process
+- separate remote MCP server processes
+- real HTTP traffic between them
 
 Current laptop walkthrough:
 
@@ -187,6 +253,13 @@ reply is generated through the OpenAI Responses API after a required tool call.
 - registry state before and after lifecycle transitions
 - timestamps for disconnect, reconnect, expiry, and reassignment
 
+For the current filesystem remote proof, also capture:
+
+- created artifact path
+- gateway `/sessions` snapshot
+- gateway `/observability` summary
+- direct `/workspace` snapshots from both remote servers
+
 ## Suggested Test Matrix
 
 | Scenario | Expected Result |
@@ -208,6 +281,14 @@ reply is generated through the OpenAI Responses API after a required tool call.
 - one CLI-driven validation script or test harness
 - captured evidence for each scenario in the test matrix
 - clear notes on where the thesis holds and where it does not
+
+Current status:
+
+- chosen first target: `filesystem`
+- repeatable multi-process proof: implemented
+- canonical proof directory: `validation/multicontainer/`
+- Docker topology file: `validation/multicontainer/compose.yaml`
+- CLI client proof: `npm run validate:filesystem:multicontainer`
 
 ## Success Criteria
 
