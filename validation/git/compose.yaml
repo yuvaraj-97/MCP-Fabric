@@ -30,8 +30,11 @@ services:
       - mcp-server-a
       - mcp-server-b
     environment:
+      HOST: "0.0.0.0"
       PORT: "4400"
       LOAD_THRESHOLD: "0.8"
+      MCP_GATEWAY_ALLOW_PUBLIC_BIND: "1"
+      MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT: "0"
       SERVER_INSTANCES_JSON: >-
         [{"serverInstanceId":"git-a","load":0.12,"healthy":true,"acceptingNewSessions":true},
         {"serverInstanceId":"git-b","load":0.28,"healthy":true,"acceptingNewSessions":true}]

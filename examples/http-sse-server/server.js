@@ -13,5 +13,8 @@ const gateway = createHttpSseGatewayServer({
   serverInstances: [{ serverInstanceId: "http-server-1", load: 0.1 }],
 });
 
-const address = await gateway.listen(operatorConfig.port);
+const address = await gateway.listen({
+  port: operatorConfig.port,
+  host: operatorConfig.host,
+});
 console.log(`HTTP/SSE inspector listening on http://127.0.0.1:${address.port}/inspector`);

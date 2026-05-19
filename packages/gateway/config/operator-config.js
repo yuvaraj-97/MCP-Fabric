@@ -1,18 +1,30 @@
 export const DEFAULT_GATEWAY_OPERATOR_CONFIG = Object.freeze({
   port: 3000,
+  host: "127.0.0.1",
   serverCount: 3,
   loadThreshold: 0.7,
+  autoScaleThreshold: 0.8,
   sessionTtlMs: 5 * 60 * 1000,
   reconnectGracePeriodMs: 30 * 1000,
+  onDisconnect: "cancel",
+  allowPublicBind: false,
+  enforceStartupSecurityAudit: true,
 });
 
 export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
   port: 4321,
+  host: "127.0.0.1",
   serverCount: 3,
   loadThreshold: 0.7,
+  autoScaleThreshold: 0.8,
   sessionTtlMs: 60 * 1000,
   reconnectGracePeriodMs: 15 * 1000,
+  onDisconnect: "cancel",
+  allowPublicBind: false,
+  enforceStartupSecurityAudit: true,
 });
+
+const ALLOWED_ON_DISCONNECT_VALUES = new Set(["cancel", "queue"]);
 
 export function resolveOperatorConfig({
   config = {},
@@ -20,11 +32,17 @@ export function resolveOperatorConfig({
 } = {}) {
   const resolved = {
     port: config.port ?? defaults.port,
+    host: config.host ?? defaults.host,
     serverCount: config.serverCount ?? defaults.serverCount,
     loadThreshold: config.loadThreshold ?? defaults.loadThreshold,
+    autoScaleThreshold: config.autoScaleThreshold ?? defaults.autoScaleThreshold,
     sessionTtlMs: config.sessionTtlMs ?? defaults.sessionTtlMs,
     reconnectGracePeriodMs:
       config.reconnectGracePeriodMs ?? defaults.reconnectGracePeriodMs,
+    onDisconnect: config.onDisconnect ?? defaults.onDisconnect,
+    allowPublicBind: config.allowPublicBind ?? defaults.allowPublicBind,
+    enforceStartupSecurityAudit:
+      config.enforceStartupSecurityAudit ?? defaults.enforceStartupSecurityAudit,
   };
 
   validateOperatorConfig(resolved);
@@ -39,17 +57,30 @@ export function operatorConfigFromEnv({
     defaults,
     config: {
       port: parseOptionalNumber(env.PORT),
+      host: env.HOST ?? env.MCP_GATEWAY_HOST ?? env.MCP_OPERATOR_HOST,
       serverCount: parseOptionalNumber(
         env.MCP_GATEWAY_DEFAULT_SERVER_COUNT ?? env.MCP_OPERATOR_SERVER_COUNT,
       ),
       loadThreshold: parseOptionalNumber(
         env.MCP_GATEWAY_LOAD_THRESHOLD ?? env.MCP_OPERATOR_MAX_LOAD,
       ),
+      autoScaleThreshold: parseOptionalNumber(
+        env.MCP_GATEWAY_AUTOSCALE_THRESHOLD ?? env.MCP_OPERATOR_AUTOSCALE_THRESHOLD,
+      ),
       sessionTtlMs: parseOptionalNumber(
         env.MCP_GATEWAY_SESSION_TTL_MS ?? env.MCP_OPERATOR_SESSION_TTL_MS,
       ),
       reconnectGracePeriodMs: parseOptionalNumber(
         env.MCP_GATEWAY_RECONNECT_GRACE_MS ?? env.MCP_OPERATOR_RECONNECT_GRACE_MS,
+      ),
+      onDisconnect:
+        env.MCP_GATEWAY_ON_DISCONNECT ?? env.MCP_OPERATOR_ON_DISCONNECT,
+      allowPublicBind: parseOptionalBoolean(
+        env.MCP_GATEWAY_ALLOW_PUBLIC_BIND ?? env.MCP_OPERATOR_ALLOW_PUBLIC_BIND,
+      ),
+      enforceStartupSecurityAudit: parseOptionalBoolean(
+        env.MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT ??
+          env.MCP_OPERATOR_ENFORCE_STARTUP_SECURITY_AUDIT,
       ),
     },
   });
@@ -75,6 +106,7 @@ function demoLoadFor(index) {
 
 function validateOperatorConfig(config) {
   assertPositiveInteger(config.port, "port");
+  assertNonEmptyString(config.host, "host");
   assertPositiveInteger(config.serverCount, "serverCount");
 
   if (typeof config.loadThreshold !== "number" || Number.isNaN(config.loadThreshold)) {
@@ -85,8 +117,31 @@ function validateOperatorConfig(config) {
     throw new RangeError("loadThreshold must be between 0 and 1");
   }
 
+  if (
+    typeof config.autoScaleThreshold !== "number" ||
+    Number.isNaN(config.autoScaleThreshold)
+  ) {
+    throw new TypeError("autoScaleThreshold must be a number");
+  }
+
+  if (config.autoScaleThreshold < 0 || config.autoScaleThreshold > 1) {
+    throw new RangeError("autoScaleThreshold must be between 0 and 1");
+  }
+
   assertPositiveInteger(config.sessionTtlMs, "sessionTtlMs");
   assertPositiveInteger(config.reconnectGracePeriodMs, "reconnectGracePeriodMs");
+
+  if (!ALLOWED_ON_DISCONNECT_VALUES.has(config.onDisconnect)) {
+    throw new RangeError('onDisconnect must be one of: "cancel", "queue"');
+  }
+
+  if (typeof config.allowPublicBind !== "boolean") {
+    throw new TypeError("allowPublicBind must be a boolean");
+  }
+
+  if (typeof config.enforceStartupSecurityAudit !== "boolean") {
+    throw new TypeError("enforceStartupSecurityAudit must be a boolean");
+  }
 }
 
 function parseOptionalNumber(value) {
@@ -102,8 +157,30 @@ function parseOptionalNumber(value) {
   return parsed;
 }
 
+function parseOptionalBoolean(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (value === "true" || value === "1") {
+    return true;
+  }
+
+  if (value === "false" || value === "0") {
+    return false;
+  }
+
+  throw new TypeError(`Expected a boolean environment value, received ${value}`);
+}
+
 function assertPositiveInteger(value, name) {
   if (!Number.isInteger(value) || value <= 0) {
     throw new RangeError(`${name} must be a positive integer`);
+  }
+}
+
+function assertNonEmptyString(value, name) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`${name} must be a non-empty string`);
   }
 }

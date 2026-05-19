@@ -127,20 +127,36 @@ The local dashboard and HTTP/SSE gateway now support basic operator-oriented
 configuration through environment variables:
 
 - `PORT`
+- `HOST`
 - `MCP_GATEWAY_DEFAULT_SERVER_COUNT`
 - `MCP_GATEWAY_LOAD_THRESHOLD`
+- `MCP_GATEWAY_AUTOSCALE_THRESHOLD`
 - `MCP_GATEWAY_SESSION_TTL_MS`
 - `MCP_GATEWAY_RECONNECT_GRACE_MS`
+- `MCP_GATEWAY_ON_DISCONNECT`
+- `MCP_GATEWAY_ALLOW_PUBLIC_BIND`
+- `MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT`
 
 Example:
 
 ```sh
+HOST=127.0.0.1 \
 MCP_GATEWAY_DEFAULT_SERVER_COUNT=4 \
 MCP_GATEWAY_LOAD_THRESHOLD=0.75 \
+MCP_GATEWAY_AUTOSCALE_THRESHOLD=0.8 \
 MCP_GATEWAY_SESSION_TTL_MS=90000 \
 MCP_GATEWAY_RECONNECT_GRACE_MS=12000 \
+MCP_GATEWAY_ON_DISCONNECT=queue \
 npm run demo
 ```
+
+Security note:
+
+- loopback binds such as `127.0.0.1` are the default
+- public binds such as `0.0.0.0` now trigger a startup security warning
+- public binds fail fast unless explicitly allowed
+- the Docker multi-container proofs opt into public bind and disable the
+  startup self-hijack check inside the container topology
 
 The gateway also exposes a JSON observability surface at `/observability` with:
 

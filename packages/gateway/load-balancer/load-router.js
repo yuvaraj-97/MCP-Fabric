@@ -2,8 +2,16 @@ export class LoadRouter {
   #sessionRegistry;
   #loadThreshold;
   #instances = new Map();
+  #autoScaleThreshold;
+  #autoScalerHook;
+  #clusterPressureActive = false;
 
-  constructor({ sessionRegistry, loadThreshold = 0.7 } = {}) {
+  constructor({
+    sessionRegistry,
+    loadThreshold = 0.7,
+    autoScaleThreshold = 0.8,
+    autoScalerHook,
+  } = {}) {
     if (!sessionRegistry) {
       throw new TypeError("sessionRegistry is required");
     }
@@ -12,13 +20,33 @@ export class LoadRouter {
       throw new RangeError("loadThreshold must be a number between 0 and 1");
     }
 
+    if (
+      typeof autoScaleThreshold !== "number" ||
+      autoScaleThreshold < 0 ||
+      autoScaleThreshold > 1
+    ) {
+      throw new RangeError("autoScaleThreshold must be a number between 0 and 1");
+    }
+
+    if (
+      autoScalerHook !== undefined &&
+      autoScalerHook !== null &&
+      typeof autoScalerHook !== "function" &&
+      typeof autoScalerHook.onClusterPressure !== "function"
+    ) {
+      throw new TypeError("autoScalerHook must be a function or an object with onClusterPressure");
+    }
+
     this.#sessionRegistry = sessionRegistry;
     this.#loadThreshold = loadThreshold;
+    this.#autoScaleThreshold = autoScaleThreshold;
+    this.#autoScalerHook = autoScalerHook ?? null;
   }
 
   upsertInstance(instance) {
     const normalized = normalizeInstance(instance);
     this.#instances.set(normalized.serverInstanceId, normalized);
+    this.#evaluateClusterPressure();
     return { ...normalized };
   }
 
@@ -26,6 +54,7 @@ export class LoadRouter {
     assertNonEmptyString(serverInstanceId, "serverInstanceId");
     this.#instances.delete(serverInstanceId);
     this.#sessionRegistry.deleteByServer(serverInstanceId);
+    this.#evaluateClusterPressure();
   }
 
   routeSession(sessionId) {
@@ -109,6 +138,32 @@ export class LoadRouter {
     return Array.from(this.#instances.values(), (instance) => ({ ...instance }));
   }
 
+  describeClusterPressure() {
+    const instances = this.listInstances();
+    const healthyInstances = instances.filter((instance) => instance.healthy);
+    const eligibleInstanceCount = instances.filter(
+      (instance) =>
+        instance.healthy &&
+        instance.acceptingNewSessions &&
+        instance.load < this.#loadThreshold,
+    ).length;
+    const averageLoad =
+      healthyInstances.length > 0
+        ? healthyInstances.reduce((sum, instance) => sum + instance.load, 0) /
+          healthyInstances.length
+        : 0;
+
+    return {
+      averageLoad,
+      healthyInstanceCount: healthyInstances.length,
+      eligibleInstanceCount,
+      totalInstanceCount: instances.length,
+      threshold: this.#autoScaleThreshold,
+      instances,
+      active: averageLoad >= this.#autoScaleThreshold,
+    };
+  }
+
   #selectForNewSession(trace) {
     const candidates = [];
     for (const instance of this.#instances.values()) {
@@ -156,6 +211,46 @@ export class LoadRouter {
     }
 
     return candidates[0];
+  }
+
+  #evaluateClusterPressure() {
+    if (!this.#autoScalerHook) {
+      return;
+    }
+
+    const snapshot = this.describeClusterPressure();
+    if (!snapshot.active) {
+      this.#clusterPressureActive = false;
+      return;
+    }
+
+    if (this.#clusterPressureActive) {
+      return;
+    }
+
+    this.#clusterPressureActive = true;
+    const event = {
+      type: "cluster-pressure",
+      observedAt: new Date().toISOString(),
+      averageLoad: snapshot.averageLoad,
+      healthyInstanceCount: snapshot.healthyInstanceCount,
+      eligibleInstanceCount: snapshot.eligibleInstanceCount,
+      totalInstanceCount: snapshot.totalInstanceCount,
+      threshold: snapshot.threshold,
+      instances: snapshot.instances,
+      reason: "average-load-at-or-above-threshold",
+    };
+
+    try {
+      if (typeof this.#autoScalerHook === "function") {
+        this.#autoScalerHook(event);
+        return;
+      }
+
+      this.#autoScalerHook.onClusterPressure(event);
+    } catch {
+      // Hook failures must not break routing.
+    }
   }
 }
 

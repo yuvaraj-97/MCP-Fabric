@@ -4,7 +4,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createHttpSseGatewayController } from "../../packages/transports/http-sse/gateway-server.js";
+import {
+  createHttpSseGatewayController,
+  isPublicBindHost,
+  runStartupSecurityAudit,
+} from "../../packages/transports/http-sse/gateway-server.js";
 import { FileSessionRegistry } from "../../packages/gateway/session-registry/file-session-registry.js";
 
 test("gateway controller keeps a session sticky and publishes route events without sockets", async () => {
@@ -196,6 +200,7 @@ test("gateway controller exposes operator-configured lifecycle policy values", (
       loadThreshold: 0.75,
       sessionTtlMs: 90_000,
       reconnectGracePeriodMs: 12_000,
+      onDisconnect: "queue",
     },
   });
 
@@ -203,6 +208,72 @@ test("gateway controller exposes operator-configured lifecycle policy values", (
   assert.equal(registry.loadThreshold, 0.75);
   assert.equal(registry.sessionTtlMs, 90_000);
   assert.equal(registry.reconnectGracePeriodMs, 12_000);
+  assert.equal(registry.onDisconnect, "queue");
+});
+
+test("gateway controller queues a disconnect policy event when onDisconnect=queue", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    operatorConfig: {
+      onDisconnect: "queue",
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-queue-policy",
+    params: { clientId: "queue-policy-test" },
+  });
+
+  const firstCollector = createEventCollector();
+  controller.attachEventStream(initialized.sessionId, firstCollector);
+  controller.detachEventStream(initialized.sessionId, firstCollector);
+
+  const queuedEvents = controller.listQueuedDisconnectEvents(initialized.sessionId);
+  assert.equal(queuedEvents.length, 1);
+  assert.equal(queuedEvents[0].event, "disconnect.policy.queued");
+  assert.equal(queuedEvents[0].payload.policy, "queue");
+
+  const secondCollector = createEventCollector();
+  controller.attachEventStream(initialized.sessionId, secondCollector);
+
+  const replayed = secondCollector.chunks.join("");
+  assert.match(replayed, /event: disconnect\.policy\.queued/);
+  assert.equal(controller.listQueuedDisconnectEvents(initialized.sessionId).length, 0);
+  assert.ok(
+    controller
+      .listAuditEvents()
+      .some((event) => event.eventType === "disconnect.queue.flushed" && event.sessionId === initialized.sessionId),
+  );
+});
+
+test("gateway controller records cancel policy without queueing reconnect output when onDisconnect=cancel", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    operatorConfig: {
+      onDisconnect: "cancel",
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-cancel-policy",
+    params: { clientId: "cancel-policy-test" },
+  });
+
+  const collector = createEventCollector();
+  controller.attachEventStream(initialized.sessionId, collector);
+  controller.detachEventStream(initialized.sessionId, collector);
+
+  assert.equal(controller.listQueuedDisconnectEvents(initialized.sessionId).length, 0);
+  assert.ok(
+    controller.listAuditEvents().some(
+      (event) =>
+        event.eventType === "disconnect.policy.applied" &&
+        event.sessionId === initialized.sessionId &&
+        event.policy === "cancel",
+    ),
+  );
 });
 
 test("gateway controller records observability events and counters", async () => {
@@ -228,6 +299,73 @@ test("gateway controller records observability events and counters", async () =>
   assert.ok(observability.summary.totalEvents >= 4);
   assert.ok(observability.recentEvents.some((event) => event.eventType === "request.received"));
   assert.ok(observability.recentEvents.some((event) => event.eventType === "route.completed"));
+});
+
+test("startup security helpers classify public bind hosts correctly", () => {
+  assert.equal(isPublicBindHost("127.0.0.1"), false);
+  assert.equal(isPublicBindHost("0.0.0.0"), true);
+  assert.equal(isPublicBindHost("::"), true);
+});
+
+test("startup security audit rejects unsafe public binds by default", async () => {
+  const logs = [];
+
+  await assert.rejects(
+    () =>
+      runStartupSecurityAudit({
+        host: "0.0.0.0",
+        port: 3000,
+        allowPublicBind: false,
+        enforceStartupSecurityAudit: true,
+        auditLogger: {
+          error(message) {
+            logs.push(message);
+          },
+        },
+      }),
+    /FATAL: Gateway is publicly accessible and vulnerable to hijacking/,
+  );
+
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /\[SECURITY WARNING\]/);
+});
+
+test("startup security audit can allow public bind only when the self-hijack probe stays disabled", async () => {
+  const logs = [];
+
+  await runStartupSecurityAudit({
+    host: "0.0.0.0",
+    port: 3000,
+    allowPublicBind: true,
+    enforceStartupSecurityAudit: false,
+    auditLogger: {
+      error(message) {
+        logs.push(message);
+      },
+    },
+  });
+
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /\[SECURITY WARNING\]/);
+});
+
+test("startup security audit fails when the self-hijack probe succeeds", async () => {
+  await assert.rejects(
+    () =>
+      runStartupSecurityAudit({
+        host: "0.0.0.0",
+        port: 3000,
+        allowPublicBind: true,
+        enforceStartupSecurityAudit: true,
+        fetchImpl: async () => ({
+          ok: true,
+        }),
+        auditLogger: {
+          error() {},
+        },
+      }),
+    /FATAL: Gateway is publicly accessible and vulnerable to hijacking/,
+  );
 });
 
 function createEventCollector() {

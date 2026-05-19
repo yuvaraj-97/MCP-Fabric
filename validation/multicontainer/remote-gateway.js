@@ -7,6 +7,17 @@ const remoteBaseUrls = JSON.parse(process.env.REMOTE_BASE_URLS_JSON ?? "{}");
 const loadThreshold = process.env.LOAD_THRESHOLD
   ? Number.parseFloat(process.env.LOAD_THRESHOLD)
   : undefined;
+const host = process.env.HOST ?? "127.0.0.1";
+const allowPublicBind =
+  process.env.MCP_GATEWAY_ALLOW_PUBLIC_BIND === "1" ||
+  process.env.MCP_GATEWAY_ALLOW_PUBLIC_BIND === "true";
+const enforceStartupSecurityAudit =
+  process.env.MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT === undefined
+    ? true
+    : !(
+        process.env.MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT === "0" ||
+        process.env.MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT === "false"
+      );
 
 if (serverInstances.length === 0) {
   throw new TypeError("SERVER_INSTANCES_JSON must define at least one instance");
@@ -28,11 +39,17 @@ const gateway = createHttpSseGatewayServer({
   },
 });
 
-const address = await gateway.listen(port);
+const address = await gateway.listen({
+  port,
+  host,
+  allowPublicBind,
+  enforceStartupSecurityAudit,
+});
 console.log(JSON.stringify({
   type: "ready",
   kind: "filesystem-remote-gateway",
   port: address.port,
+  host,
   serverInstances: serverInstances.map((instance) => ({
     serverInstanceId: instance.serverInstanceId,
     baseUrl: remoteBaseUrls[instance.serverInstanceId],

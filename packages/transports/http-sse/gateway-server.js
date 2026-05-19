@@ -15,16 +15,23 @@ export function createHttpSseGatewayServer({
   createApplication,
   operatorConfig,
   loadThreshold,
+  autoScaleThreshold,
   sessionRegistry,
   sessionTtlMs,
   reconnectGracePeriodMs,
+  onDisconnect,
+  autoScalerHook,
+  fetchImpl = globalThis.fetch,
+  auditLogger = console,
   now = () => Date.now(),
 } = {}) {
   const resolvedOperatorConfig = resolveOperatorConfig({
     config: mergeExplicitOperatorConfig(operatorConfig, {
       loadThreshold,
+      autoScaleThreshold,
       sessionTtlMs,
       reconnectGracePeriodMs,
+      onDisconnect,
     }),
     defaults: DEFAULT_GATEWAY_OPERATOR_CONFIG,
   });
@@ -42,12 +49,34 @@ export function createHttpSseGatewayServer({
     router: controller.router,
     sessionRegistry: controller.sessionRegistry,
     applications: controller.applications,
-    listen(port = 0) {
-      return new Promise((resolve) => {
-        server.listen(port, () => {
+    async listen(portOrOptions = resolvedOperatorConfig.port, maybeHost) {
+      const listenOptions = normalizeGatewayListenOptions({
+        defaults: resolvedOperatorConfig,
+        portOrOptions,
+        maybeHost,
+      });
+      const address = await new Promise((resolve) => {
+        server.listen(listenOptions.port, listenOptions.host, () => {
           resolve(server.address());
         });
       });
+
+      try {
+        await runStartupSecurityAudit({
+          address,
+          allowPublicBind: listenOptions.allowPublicBind,
+          auditLogger: listenOptions.auditLogger ?? auditLogger,
+          enforceStartupSecurityAudit: listenOptions.enforceStartupSecurityAudit,
+          fetchImpl: listenOptions.fetchImpl ?? fetchImpl,
+          host: listenOptions.host,
+          port: address.port,
+        });
+      } catch (error) {
+        await new Promise((resolve) => server.close(() => resolve()));
+        throw error;
+      }
+
+      return address;
     },
     close() {
       return new Promise((resolve, reject) => {
@@ -120,6 +149,9 @@ export function createGatewayHttpHandler({
           sessionId,
           route,
         });
+        for (const queuedEvent of route?.queuedDisconnectEvents ?? []) {
+          writeSse(response, queuedEvent.event, queuedEvent.payload);
+        }
 
         request.on?.("close", () => {
           controller.detachEventStream(sessionId, response);
@@ -159,31 +191,44 @@ export function createHttpSseGatewayController({
   createApplication = defaultApplicationFactory,
   operatorConfig,
   loadThreshold,
+  autoScaleThreshold,
+  autoScalerHook,
   sessionRegistry,
   sessionTtlMs,
   reconnectGracePeriodMs,
+  onDisconnect,
   now = () => Date.now(),
 } = {}) {
   const resolvedOperatorConfig = resolveOperatorConfig({
     config: mergeExplicitOperatorConfig(operatorConfig, {
       loadThreshold,
+      autoScaleThreshold,
       sessionTtlMs,
       reconnectGracePeriodMs,
+      onDisconnect,
     }),
     defaults: DEFAULT_GATEWAY_OPERATOR_CONFIG,
   });
   const {
     loadThreshold: effectiveLoadThreshold,
+    autoScaleThreshold: effectiveAutoScaleThreshold,
     sessionTtlMs: effectiveSessionTtlMs,
     reconnectGracePeriodMs: effectiveReconnectGracePeriodMs,
+    onDisconnect: effectiveOnDisconnect,
+    host: effectiveHost,
+    allowPublicBind: effectiveAllowPublicBind,
+    enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
   } = resolvedOperatorConfig;
   const resolvedSessionRegistry = sessionRegistry ?? new MemorySessionRegistry({ now });
   const router = new LoadRouter({
     sessionRegistry: resolvedSessionRegistry,
     loadThreshold: effectiveLoadThreshold,
+    autoScaleThreshold: effectiveAutoScaleThreshold,
+    autoScalerHook,
   });
   const applications = new Map();
   const eventStreams = new Map();
+  const queuedDisconnectEvents = new Map();
   const observer = createGatewayObserver({ now });
 
   for (const instance of serverInstances) {
@@ -207,8 +252,13 @@ export function createHttpSseGatewayController({
             ? resolvedSessionRegistry.isDurable()
             : false,
         loadThreshold: effectiveLoadThreshold,
+        autoScaleThreshold: effectiveAutoScaleThreshold,
         sessionTtlMs: effectiveSessionTtlMs,
         reconnectGracePeriodMs: effectiveReconnectGracePeriodMs,
+        onDisconnect: effectiveOnDisconnect,
+        host: effectiveHost,
+        allowPublicBind: effectiveAllowPublicBind,
+        enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
         filePath:
           typeof resolvedSessionRegistry.filePath === "function"
             ? resolvedSessionRegistry.filePath()
@@ -259,19 +309,43 @@ export function createHttpSseGatewayController({
       }
 
       addEventStream(eventStreams, sessionId, response);
+      const queuedEvents = takeQueuedDisconnectEvents({
+        eventStreams,
+        observer,
+        queuedDisconnectEvents,
+        response,
+        sessionId,
+      });
+      if (typeof response.writeHead !== "function") {
+        for (const queuedEvent of queuedEvents) {
+          writeSse(response, queuedEvent.event, queuedEvent.payload);
+        }
+      }
       observer.record("stream.attached", {
         sessionId,
         serverInstanceId: record.serverInstanceId,
         activeSessionRecord: true,
         reconnectState,
       });
-      return record;
+      return {
+        ...record,
+        queuedDisconnectEvents: queuedEvents,
+      };
     },
     detachEventStream(sessionId, response) {
       removeEventStream(eventStreams, sessionId, response);
       if (!hasActiveEventStream(eventStreams, sessionId)) {
         resolvedSessionRegistry.markDisconnected?.(sessionId, {
           gracePeriodMs: effectiveReconnectGracePeriodMs,
+        });
+        applyDisconnectPolicy({
+          eventStreams,
+          observer,
+          queuedDisconnectEvents,
+          response,
+          sessionId,
+          policy: effectiveOnDisconnect,
+          serverInstanceId: resolvedSessionRegistry.get(sessionId)?.serverInstanceId ?? null,
         });
       }
       observer.record("stream.detached", {
@@ -426,6 +500,12 @@ export function createHttpSseGatewayController({
     },
     listPublishedEvents(sessionId) {
       return Array.from(eventStreams.get(sessionId) ?? []);
+    },
+    listQueuedDisconnectEvents(sessionId) {
+      return (queuedDisconnectEvents.get(sessionId) ?? []).map((entry) => ({
+        event: entry.event,
+        payload: { ...entry.payload },
+      }));
     },
     listAuditEvents(limit) {
       return observer.listEvents(typeof limit === "number" ? { limit } : undefined);
@@ -592,6 +672,94 @@ function buildLifecycleMetadata({ existingRecord, clientId, now, sessionTtlMs })
   };
 }
 
+function applyDisconnectPolicy({
+  eventStreams,
+  observer,
+  queuedDisconnectEvents,
+  sessionId,
+  policy,
+  serverInstanceId,
+}) {
+  observer.record("disconnect.policy.applied", {
+    sessionId,
+    serverInstanceId,
+    policy,
+    action:
+      policy === "queue" ? "queue-results-until-reconnect" : "cancel-in-flight-work",
+  });
+
+  if (policy !== "queue") {
+    queuedDisconnectEvents.delete(sessionId);
+    return;
+  }
+
+  const payload = {
+    sessionId,
+    serverInstanceId,
+    policy,
+    action: "queue-results-until-reconnect",
+    observedAt: new Date().toISOString(),
+  };
+  queueDisconnectEvent({
+    eventStreams,
+    observer,
+    queuedDisconnectEvents,
+    sessionId,
+    event: "disconnect.policy.queued",
+    payload,
+  });
+}
+
+function queueDisconnectEvent({
+  eventStreams,
+  observer,
+  queuedDisconnectEvents,
+  sessionId,
+  event,
+  payload,
+}) {
+  if (hasActiveEventStream(eventStreams, sessionId)) {
+    publishEvent(eventStreams, sessionId, event, payload);
+    return;
+  }
+
+  const queued = queuedDisconnectEvents.get(sessionId) ?? [];
+  queued.push({
+    event,
+    payload,
+  });
+  queuedDisconnectEvents.set(sessionId, queued);
+  observer.record("disconnect.queue.buffered", {
+    sessionId,
+    queuedEvent: event,
+    queuedEventCount: queued.length,
+  });
+}
+
+function takeQueuedDisconnectEvents({
+  eventStreams,
+  observer,
+  queuedDisconnectEvents,
+  response,
+  sessionId,
+}) {
+  const queued = queuedDisconnectEvents.get(sessionId);
+  if (!queued?.length) {
+    return [];
+  }
+
+  queuedDisconnectEvents.delete(sessionId);
+  observer.record("disconnect.queue.flushed", {
+    sessionId,
+    flushedEventCount: queued.length,
+    hasActiveStream: hasActiveEventStream(eventStreams, sessionId),
+  });
+  return queued.map((queuedEvent) => ({
+    event: queuedEvent.event,
+    payload: { ...queuedEvent.payload },
+  }));
+}
+
 function createGatewaySessionError({ sessionId, code, statusCode, message }) {
   const error = new Error(message);
   error.sessionId = sessionId;
@@ -609,6 +777,97 @@ function mergeExplicitOperatorConfig(baseConfig = {}, overrides = {}) {
   }
 
   return merged;
+}
+
+function normalizeGatewayListenOptions({
+  defaults,
+  portOrOptions,
+  maybeHost,
+} = {}) {
+  if (typeof portOrOptions === "object" && portOrOptions !== null) {
+    return {
+      port: portOrOptions.port ?? defaults.port,
+      host: portOrOptions.host ?? defaults.host,
+      allowPublicBind:
+        portOrOptions.allowPublicBind ?? defaults.allowPublicBind,
+      enforceStartupSecurityAudit:
+        portOrOptions.enforceStartupSecurityAudit ??
+        defaults.enforceStartupSecurityAudit,
+      fetchImpl: portOrOptions.fetchImpl,
+      auditLogger: portOrOptions.auditLogger,
+    };
+  }
+
+  return {
+    port: portOrOptions ?? defaults.port,
+    host: maybeHost ?? defaults.host,
+    allowPublicBind: defaults.allowPublicBind,
+    enforceStartupSecurityAudit: defaults.enforceStartupSecurityAudit,
+  };
+}
+
+export function isPublicBindHost(host) {
+  return host === "0.0.0.0" || host === "::";
+}
+
+export async function runStartupSecurityAudit({
+  address,
+  allowPublicBind,
+  auditLogger = console,
+  enforceStartupSecurityAudit,
+  fetchImpl = globalThis.fetch,
+  host,
+  port,
+} = {}) {
+  const effectiveHost =
+    typeof host === "string" && host.length > 0 ? host : address?.address;
+  const effectivePort = port ?? address?.port;
+
+  if (!isPublicBindHost(effectiveHost)) {
+    return;
+  }
+
+  auditLogger.error?.(
+    `[SECURITY WARNING] Gateway is binding to ${effectiveHost}:${effectivePort}.`,
+  );
+
+  if (allowPublicBind !== true) {
+    throw new Error(
+      "FATAL: Gateway is publicly accessible and vulnerable to hijacking. Shutting down.",
+    );
+  }
+
+  if (enforceStartupSecurityAudit === false) {
+    return;
+  }
+
+  await runSelfHijackProbe({
+    fetchImpl,
+    baseUrl: `http://127.0.0.1:${effectivePort}`,
+  });
+
+  throw new Error(
+    "FATAL: Gateway is publicly accessible and vulnerable to hijacking. Shutting down.",
+  );
+}
+
+async function runSelfHijackProbe({ fetchImpl, baseUrl }) {
+  const response = await fetchImpl(`${baseUrl}/message`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      method: "initialize",
+      params: { clientId: "startup-self-hijack-probe" },
+    }),
+  });
+
+  if (response.ok) {
+    return true;
+  }
+
+  throw new Error("Startup self-hijack probe did not receive an unauthorized failure");
 }
 
 function renderInspectorHtml() {

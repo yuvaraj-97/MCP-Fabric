@@ -144,15 +144,53 @@ test("HTTP/SSE gateway reconnects within grace and rejects reconnects after grac
   assert.equal(payload.code, "reconnect-grace-expired");
 });
 
+test("HTTP/SSE gateway flushes queued disconnect events when onDisconnect=queue", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    operatorConfig: {
+      onDisconnect: "queue",
+    },
+  });
+  const handler = createGatewayHttpHandler({ controller });
+
+  const initialized = await sendHttpMessage(handler, {
+    method: "initialize",
+    sessionId: "http-queue-policy",
+    params: { clientId: "http-queue-test" },
+  });
+
+  const firstStream = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: `/events?sessionId=${encodeURIComponent(initialized.sessionId)}`,
+    headers: { host: "127.0.0.1:3000", accept: "text/event-stream" },
+  });
+  firstStream.close();
+
+  const secondStream = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: `/events?sessionId=${encodeURIComponent(initialized.sessionId)}`,
+    headers: { host: "127.0.0.1:3000", accept: "text/event-stream" },
+  });
+
+  const replayedEvents = parseSseEvents(secondStream.body);
+  assert.ok(replayedEvents.some((event) => event.event === "disconnect.policy.queued"));
+  secondStream.close();
+});
+
 test("HTTP/SSE gateway exposes operator observability over HTTP", async () => {
   const controller = createHttpSseGatewayController({
     serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    operatorConfig: {
+      onDisconnect: "queue",
+    },
   });
   const handler = createGatewayHttpHandler({ controller });
 
   await sendHttpMessage(handler, {
     method: "initialize",
     params: { clientId: "obs-http-test" },
+  }).then((initialized) => {
+    assert.equal(initialized.recovery.registry.onDisconnect, "queue");
   });
 
   const response = await invokeHttpHandler(handler, {

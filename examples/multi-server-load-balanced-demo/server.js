@@ -20,5 +20,8 @@ const gateway = createHttpSseGatewayServer({
   ],
 });
 
-const address = await gateway.listen(operatorConfig.port);
+const address = await gateway.listen({
+  port: operatorConfig.port,
+  host: operatorConfig.host,
+});
 console.log(`Load-balanced inspector listening on http://127.0.0.1:${address.port}/inspector`);

@@ -13,19 +13,30 @@ export class McpApplicationServer {
   #tools = new Map();
   #methodHandlers = new Map();
   #notificationLog = [];
+  #maxNotificationLogEntries;
+  #notificationListeners = new Set();
+  #notificationEventHook;
 
   constructor({
     serverInfo = { name: "mcp-application-server", version: "0.1.0" },
     protocolVersion = "2025-03-26",
     instructions = "Transport-neutral MCP-compatible application server.",
+    maxNotificationLogEntries = 500,
+    onNotificationEvent,
   } = {}) {
     validateServerInfo(serverInfo);
     assertNonEmptyString(protocolVersion, "protocolVersion");
     assertNonEmptyString(instructions, "instructions");
+    assertPositiveInteger(maxNotificationLogEntries, "maxNotificationLogEntries");
+    if (onNotificationEvent !== undefined && typeof onNotificationEvent !== "function") {
+      throw new TypeError("onNotificationEvent must be a function");
+    }
 
     this.#serverInfo = { ...serverInfo };
     this.#protocolVersion = protocolVersion;
     this.#instructions = instructions;
+    this.#maxNotificationLogEntries = maxNotificationLogEntries;
+    this.#notificationEventHook = onNotificationEvent ?? null;
   }
 
   registerTool(definition) {
@@ -57,6 +68,24 @@ export class McpApplicationServer {
       },
       params: cloneValue(entry.params),
     }));
+  }
+
+  getNotificationLogState() {
+    return {
+      size: this.#notificationLog.length,
+      maxEntries: this.#maxNotificationLogEntries,
+    };
+  }
+
+  subscribeToNotificationEvents(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("notification event listener must be a function");
+    }
+
+    this.#notificationListeners.add(listener);
+    return () => {
+      this.#notificationListeners.delete(listener);
+    };
   }
 
   async handleMessage(message, contextInput = {}) {
@@ -161,12 +190,41 @@ export class McpApplicationServer {
   }
 
   async #handleNotification(message, context) {
-    this.#notificationLog.push({
+    const entry = {
       method: message.method,
       params: cloneValue(message.params ?? {}),
       context,
       receivedAt: Date.now(),
+    };
+
+    this.#notificationLog.push(entry);
+    const droppedEntries = Math.max(this.#notificationLog.length - this.#maxNotificationLogEntries, 0);
+    if (droppedEntries > 0) {
+      this.#notificationLog.splice(0, droppedEntries);
+    }
+
+    this.#emitNotificationEvent({
+      eventType: "notification.recorded",
+      receivedAt: entry.receivedAt,
+      notification: entry,
+      log: {
+        size: this.#notificationLog.length,
+        maxEntries: this.#maxNotificationLogEntries,
+        droppedEntries,
+      },
     });
+  }
+
+  #emitNotificationEvent(event) {
+    const payload = cloneValue(event);
+
+    if (this.#notificationEventHook) {
+      this.#notificationEventHook(payload);
+    }
+
+    for (const listener of this.#notificationListeners) {
+      listener(cloneValue(event));
+    }
   }
 }
 
@@ -247,6 +305,12 @@ function validateServerInfo(serverInfo) {
 function assertNonEmptyString(value, name) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw createProtocolError(-32602, `${name} must be a non-empty string`);
+  }
+}
+
+function assertPositiveInteger(value, name) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive integer`);
   }
 }
 

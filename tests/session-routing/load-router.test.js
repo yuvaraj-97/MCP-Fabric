@@ -112,3 +112,61 @@ test("explains routing decisions step by step for the demo dashboard", () => {
   assert.ok(decision.trace.some((entry) => entry.type === "instance-selected"));
   assert.ok(decision.trace.some((entry) => entry.type === "session-assigned"));
 });
+
+test("auto scaler hook emits once when healthy average load crosses threshold", () => {
+  const registry = new MemorySessionRegistry();
+  const events = [];
+  const router = new LoadRouter({
+    sessionRegistry: registry,
+    autoScaleThreshold: 0.8,
+    autoScalerHook(event) {
+      events.push(event);
+    },
+  });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.7, healthy: true });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.9, healthy: true });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.95, healthy: true });
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "cluster-pressure");
+  assert.equal(events[0].healthyInstanceCount, 2);
+  assert.equal(events[0].totalInstanceCount, 2);
+  assert.ok(events[0].averageLoad >= 0.8);
+});
+
+test("auto scaler hook resets after pressure drops below threshold", () => {
+  const registry = new MemorySessionRegistry();
+  const events = [];
+  const router = new LoadRouter({
+    sessionRegistry: registry,
+    autoScaleThreshold: 0.8,
+    autoScalerHook(event) {
+      events.push(event);
+    },
+  });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.9, healthy: true });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.9, healthy: true });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.1, healthy: true });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.95, healthy: true });
+
+  assert.equal(events.length, 2);
+});
+
+test("auto scaler hook failures do not break routing", () => {
+  const registry = new MemorySessionRegistry();
+  const router = new LoadRouter({
+    sessionRegistry: registry,
+    autoScaleThreshold: 0.8,
+    autoScalerHook() {
+      throw new Error("autoscaler unavailable");
+    },
+  });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.9, healthy: true });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.2, healthy: true });
+
+  const route = router.routeSession("session-1");
+  assert.equal(route.serverInstanceId, "server-b");
+});

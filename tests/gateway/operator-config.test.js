@@ -28,10 +28,33 @@ test("operator config parses valid environment overrides", () => {
   });
 
   assert.equal(config.port, 4999);
+  assert.equal(config.host, "127.0.0.1");
   assert.equal(config.serverCount, 4);
   assert.equal(config.loadThreshold, 0.75);
+  assert.equal(config.autoScaleThreshold, 0.8);
   assert.equal(config.sessionTtlMs, 90_000);
   assert.equal(config.reconnectGracePeriodMs, 12_000);
+  assert.equal(config.onDisconnect, "cancel");
+  assert.equal(config.allowPublicBind, false);
+  assert.equal(config.enforceStartupSecurityAudit, true);
+});
+
+test("operator config parses a valid disconnect policy override", () => {
+  const config = operatorConfigFromEnv({
+    env: {
+      MCP_GATEWAY_ON_DISCONNECT: "queue",
+      HOST: "0.0.0.0",
+      MCP_GATEWAY_AUTOSCALE_THRESHOLD: "0.91",
+      MCP_GATEWAY_ALLOW_PUBLIC_BIND: "1",
+      MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT: "0",
+    },
+  });
+
+  assert.equal(config.onDisconnect, "queue");
+  assert.equal(config.host, "0.0.0.0");
+  assert.equal(config.autoScaleThreshold, 0.91);
+  assert.equal(config.allowPublicBind, true);
+  assert.equal(config.enforceStartupSecurityAudit, false);
 });
 
 test("operator config rejects invalid threshold values", () => {
@@ -41,6 +64,14 @@ test("operator config rejects invalid threshold values", () => {
         env: { MCP_GATEWAY_LOAD_THRESHOLD: "1.2" },
       }),
     /loadThreshold must be between 0 and 1/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_AUTOSCALE_THRESHOLD: "1.2" },
+      }),
+    /autoScaleThreshold must be between 0 and 1/,
   );
 });
 
@@ -67,6 +98,22 @@ test("operator config rejects non-positive lifecycle and fleet values", () => {
         env: { MCP_GATEWAY_RECONNECT_GRACE_MS: "0" },
       }),
     /reconnectGracePeriodMs must be a positive integer/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_ON_DISCONNECT: "pause" },
+      }),
+    /onDisconnect must be one of: "cancel", "queue"/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_ALLOW_PUBLIC_BIND: "maybe" },
+      }),
+    /Expected a boolean environment value/,
   );
 });
 
