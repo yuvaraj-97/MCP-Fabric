@@ -1,0 +1,93 @@
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  mcp-server-a:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    environment:
+      PORT: "4101"
+      ROOT_DIR: /workspace/validation-artifacts/shared-redis
+      SERVER_INSTANCE_ID: fs-a
+    command: ["node", "validation/multicontainer/remote-filesystem-server.js"]
+
+  mcp-server-b:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    environment:
+      PORT: "4102"
+      ROOT_DIR: /workspace/validation-artifacts/shared-redis
+      SERVER_INSTANCE_ID: fs-b
+    command: ["node", "validation/multicontainer/remote-filesystem-server.js"]
+
+  gateway-a:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      - redis
+      - mcp-server-a
+      - mcp-server-b
+    ports:
+      - "4200:4200"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "4200"
+      LOAD_THRESHOLD: "0.8"
+      MCP_GATEWAY_ALLOW_PUBLIC_BIND: "true"
+      MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT: "false"
+      MCP_GATEWAY_SESSION_REGISTRY_BACKEND: redis
+      MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL: redis://redis:6379
+      MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: mcp:gateway:sessions
+      SERVER_INSTANCES_JSON: >-
+        [{"serverInstanceId":"fs-a","load":0.12,"healthy":true,"acceptingNewSessions":true},{"serverInstanceId":"fs-b","load":0.26,"healthy":true,"acceptingNewSessions":true}]
+      REMOTE_BASE_URLS_JSON: >-
+        {"fs-a":"http://mcp-server-a:4101","fs-b":"http://mcp-server-b:4102"}
+    command: ["node", "validation/multicontainer/remote-gateway.js"]
+
+  gateway-b:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      - redis
+      - mcp-server-a
+      - mcp-server-b
+    ports:
+      - "4201:4201"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "4201"
+      LOAD_THRESHOLD: "0.8"
+      MCP_GATEWAY_ALLOW_PUBLIC_BIND: "true"
+      MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT: "false"
+      MCP_GATEWAY_SESSION_REGISTRY_BACKEND: redis
+      MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL: redis://redis:6379
+      MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: mcp:gateway:sessions
+      SERVER_INSTANCES_JSON: >-
+        [{"serverInstanceId":"fs-a","load":0.12,"healthy":true,"acceptingNewSessions":true},{"serverInstanceId":"fs-b","load":0.26,"healthy":true,"acceptingNewSessions":true}]
+      REMOTE_BASE_URLS_JSON: >-
+        {"fs-a":"http://mcp-server-a:4101","fs-b":"http://mcp-server-b:4102"}
+    command: ["node", "validation/multicontainer/remote-gateway.js"]
+
+  client:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      - gateway-a
+      - gateway-b
+    environment:
+      MCP_SHARED_REDIS_GATEWAY_A_URL: http://gateway-a:4200
+      MCP_SHARED_REDIS_GATEWAY_B_URL: http://gateway-b:4201
+      MCP_SHARED_REDIS_SERVER_URLS: fs-a=http://mcp-server-a:4101,fs-b=http://mcp-server-b:4102
+    command: ["node", "validation/shared-redis/run-proof.js"]

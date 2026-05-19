@@ -39,6 +39,11 @@ The Docker compose flow mounts the repo into four containers:
 - `mcp-server-b`
 - `client`
 
+For a follow-on shared-gateway proof with a real Redis-backed session registry,
+use [validation/shared-redis/README.md](../shared-redis/README.md). The memory
+target remains the strongest workload for reconnect and continuity semantics
+once cross-gateway session sharing is proven.
+
 ## Created Artifact
 
 ```text

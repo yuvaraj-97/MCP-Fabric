@@ -1,4 +1,5 @@
 import { FileSessionRegistry } from "./file-session-registry.js";
+import { createIoredisClient } from "./ioredis-client.js";
 import { MemorySessionRegistry } from "./memory-session-registry.js";
 import { RedisSessionRegistry } from "./redis-session-registry.js";
 
@@ -8,6 +9,8 @@ export function createSessionRegistry({
   now,
   redisClient,
   redisKey,
+  redisUrl,
+  redisClientFactory = createIoredisClient,
 } = {}) {
   if (backend === "memory") {
     return new MemorySessionRegistry({ now });
@@ -23,9 +26,14 @@ export function createSessionRegistry({
 
   if (backend === "redis") {
     return new RedisSessionRegistry({
-      client: redisClient,
+      client:
+        redisClient ??
+        redisClientFactory({
+          url: redisUrl,
+        }),
       key: redisKey,
       now,
+      closeClientOnClose: redisClient === undefined,
     });
   }
 

@@ -194,6 +194,30 @@ Treat `validation/multicontainer/` as the canonical proof implementation. That
 directory contains the harness, runtime entrypoints, compose file, and
 operator-facing instructions for the filesystem-first remote proof.
 
+### Shared Redis gateway proof
+
+After the single-gateway filesystem, git, and memory proofs are green, run the
+cross-gateway shared-session proof with a real Redis service.
+
+Why it matters:
+
+- this validates horizontal gateway scaling, not just single-gateway durability
+- gateway A and gateway B should both reuse the same session mapping
+- `/sessions` and `/observability` should confirm continuity on both gateways
+
+Canonical files:
+
+- proof README: `validation/shared-redis/README.md`
+- compose topology: `validation/shared-redis/compose.yaml`
+- direct client command: `npm run validate:shared-redis`
+
+Acceptance criteria:
+
+- a session initialized through gateway A is accepted through gateway B
+- gateway B reuses the same `serverInstanceId`
+- the remote MCP artifact remains readable through gateway B
+- both gateways expose session and observability evidence for the same session
+
 ### Current git remote proof
 
 The repo now also includes a headless git proof that drives the same remote

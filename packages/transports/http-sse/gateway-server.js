@@ -20,6 +20,7 @@ export function createHttpSseGatewayServer({
   sessionTtlMs,
   reconnectGracePeriodMs,
   onDisconnect,
+  redisUrl,
   autoScalerHook,
   redisClient,
   fetchImpl = globalThis.fetch,
@@ -33,6 +34,7 @@ export function createHttpSseGatewayServer({
       sessionTtlMs,
       reconnectGracePeriodMs,
       onDisconnect,
+      sessionRegistryRedisUrl: redisUrl,
     }),
     defaults: DEFAULT_GATEWAY_OPERATOR_CONFIG,
   });
@@ -41,6 +43,7 @@ export function createHttpSseGatewayServer({
     createApplication,
     operatorConfig: resolvedOperatorConfig,
     sessionRegistry,
+    redisUrl,
     redisClient,
     now,
   });
@@ -80,7 +83,8 @@ export function createHttpSseGatewayServer({
 
       return address;
     },
-    close() {
+    async close() {
+      await controller.sessionRegistry.close?.();
       return new Promise((resolve, reject) => {
         server.close((error) => {
           if (error) {
@@ -199,6 +203,7 @@ export function createHttpSseGatewayController({
   sessionTtlMs,
   reconnectGracePeriodMs,
   onDisconnect,
+  redisUrl,
   redisClient,
   now = () => Date.now(),
 } = {}) {
@@ -209,6 +214,7 @@ export function createHttpSseGatewayController({
       sessionTtlMs,
       reconnectGracePeriodMs,
       onDisconnect,
+      sessionRegistryRedisUrl: redisUrl,
     }),
     defaults: DEFAULT_GATEWAY_OPERATOR_CONFIG,
   });
@@ -230,6 +236,7 @@ export function createHttpSseGatewayController({
       now,
       redisClient,
       redisKey: resolvedOperatorConfig.sessionRegistryRedisKey,
+      redisUrl: resolvedOperatorConfig.sessionRegistryRedisUrl,
     });
   const router = new LoadRouter({
     sessionRegistry: resolvedSessionRegistry,
@@ -278,6 +285,7 @@ export function createHttpSseGatewayController({
           typeof resolvedSessionRegistry.redisKey === "function"
             ? resolvedSessionRegistry.redisKey()
             : undefined,
+        redisUrlConfigured: Boolean(resolvedOperatorConfig.sessionRegistryRedisUrl),
       };
     },
     describeObservability() {

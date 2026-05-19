@@ -1,10 +1,12 @@
 export class RedisSessionRegistry {
   #client;
+  #closeClientOnClose;
   #key;
   #now;
 
   constructor({
     client,
+    closeClientOnClose = false,
     key = "mcp:gateway:sessions",
     now = () => Date.now(),
   } = {}) {
@@ -14,6 +16,7 @@ export class RedisSessionRegistry {
     assertNonEmptyString(key, "key");
 
     this.#client = client;
+    this.#closeClientOnClose = closeClientOnClose;
     this.#key = key;
     this.#now = now;
   }
@@ -177,6 +180,21 @@ export class RedisSessionRegistry {
     await this.#client.del?.(this.#key);
     if (typeof this.#client.del !== "function") {
       await this.#writeState({ version: 1, sessions: {} });
+    }
+  }
+
+  async close() {
+    if (!this.#closeClientOnClose) {
+      return;
+    }
+
+    if (typeof this.#client.quit === "function") {
+      await this.#client.quit();
+      return;
+    }
+
+    if (typeof this.#client.disconnect === "function") {
+      this.#client.disconnect();
     }
   }
 

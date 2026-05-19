@@ -240,6 +240,7 @@ Use the other demos when you want a narrower transport-specific deep dive.
 | Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
 | Filesystem validation harness | `npm run validate:filesystem` | none | Headless validation of the same filesystem-style MCP app over `stdio` and gateway-backed HTTP/SSE |
 | Filesystem multi-container proof | `npm run validate:filesystem:multicontainer` | dynamic local ports | Canonical headless proof against a real HTTP gateway process with separate remote MCP server processes |
+| Shared Redis two-gateway proof | `npm run validate:shared-redis` | external topology or Docker compose | Real Redis-backed session continuity across two gateway processes sharing one session key |
 | Git validation harness | `npm run validate:git` | none | Headless validation of the same git-style MCP app over `stdio` and gateway-backed HTTP/SSE |
 | Git multi-container proof | `npm run validate:git:multicontainer` | dynamic local ports | Remote proof against a real HTTP gateway process with separate remote git MCP server processes |
 | Memory validation harness | `npm run validate:memory` | none | Headless validation of the same memory-style MCP app over `stdio` and gateway-backed HTTP/SSE |
@@ -398,6 +399,32 @@ workflow. It contains the harness, remote runtime entrypoints, compose file,
 and operator instructions:
 
 - [validation/multicontainer/README.md](./validation/multicontainer/README.md)
+
+## Run Shared Redis Two-Gateway Proof
+
+```sh
+docker compose -f validation/shared-redis/compose.yaml up --abort-on-container-exit client
+```
+
+This proof is different from the shared-workspace and shared-store proofs:
+
+- one client initializes through `gateway-a`
+- the same session continues through `gateway-b`
+- both gateways share one Redis session registry key
+- both gateways point at the same remote MCP server fleet
+
+You can also point the client at an already-running topology:
+
+```sh
+MCP_SHARED_REDIS_GATEWAY_A_URL=http://127.0.0.1:4200 \
+MCP_SHARED_REDIS_GATEWAY_B_URL=http://127.0.0.1:4201 \
+MCP_SHARED_REDIS_SERVER_URLS=fs-a=http://127.0.0.1:4101,fs-b=http://127.0.0.1:4102 \
+npm run validate:shared-redis
+```
+
+The canonical operator instructions live in:
+
+- [validation/shared-redis/README.md](./validation/shared-redis/README.md)
 
 ## Run Filesystem Conversation Validation
 

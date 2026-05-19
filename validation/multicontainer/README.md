@@ -15,6 +15,10 @@ The proof stays focused on the thesis:
 - shared workload visibility after reassignment
 - gateway observability and session snapshots
 
+For the Redis-backed shared-gateway variant, see:
+
+- [validation/shared-redis/README.md](../shared-redis/README.md)
+
 ## Primary Commands
 
 Run the default local multi-process proof:
@@ -27,6 +31,12 @@ Run the same proof as a Docker-based multi-container topology:
 
 ```sh
 docker compose -f validation/multicontainer/compose.yaml up --abort-on-container-exit client
+```
+
+Run the Redis-backed two-gateway variant:
+
+```sh
+docker compose -f validation/shared-redis/compose.yaml up --abort-on-container-exit client
 ```
 
 The Docker compose flow mounts the repo into four containers:

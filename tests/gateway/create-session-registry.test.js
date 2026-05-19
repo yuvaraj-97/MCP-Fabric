@@ -21,6 +21,21 @@ test("createSessionRegistry creates a redis registry when configured", () => {
   assert.equal(registry.redisKey(), "mcp:test:sessions");
 });
 
+test("createSessionRegistry can construct a redis client from a URL via the factory", () => {
+  const registry = createSessionRegistry({
+    backend: "redis",
+    redisUrl: "redis://127.0.0.1:6379",
+    redisKey: "mcp:test:sessions",
+    redisClientFactory({ url }) {
+      assert.equal(url, "redis://127.0.0.1:6379");
+      return createFakeRedisClient();
+    },
+  });
+
+  assert.equal(registry.storageKind(), "redis");
+  assert.equal(registry.redisKey(), "mcp:test:sessions");
+});
+
 test("createSessionRegistry requires a file path for the file backend", () => {
   assert.throws(
     () => createSessionRegistry({ backend: "file" }),

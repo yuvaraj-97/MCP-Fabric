@@ -64,12 +64,14 @@ test("operator config parses session registry backend overrides", () => {
     env: {
       MCP_GATEWAY_SESSION_REGISTRY_BACKEND: "redis",
       MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: "mcp:custom:sessions",
+      MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL: "redis://127.0.0.1:6379",
       MCP_GATEWAY_SESSION_REGISTRY_FILE: "/tmp/mcp-sessions.json",
     },
   });
 
   assert.equal(config.sessionRegistryBackend, "redis");
   assert.equal(config.sessionRegistryRedisKey, "mcp:custom:sessions");
+  assert.equal(config.sessionRegistryRedisUrl, "redis://127.0.0.1:6379");
   assert.equal(config.sessionRegistryFilePath, "/tmp/mcp-sessions.json");
 });
 
@@ -154,6 +156,14 @@ test("operator config rejects non-positive lifecycle and fleet values", () => {
         env: { MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: "   " },
       }),
     /sessionRegistryRedisKey must be a non-empty string/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL: "   " },
+      }),
+    /sessionRegistryRedisUrl must be a non-empty string when provided/,
   );
 });
 

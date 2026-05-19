@@ -1,5 +1,6 @@
 import "./gateway/operator-config.test.js";
 import "./gateway/create-session-registry.test.js";
+import "./gateway/ioredis-client.test.js";
 import "./session-routing/memory-session-registry.test.js";
 import "./session-routing/file-session-registry.test.js";
 import "./session-routing/redis-session-registry.test.js";

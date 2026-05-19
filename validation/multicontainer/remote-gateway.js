@@ -1,4 +1,5 @@
 import { createHttpSseGatewayServer } from "../../packages/transports/http-sse/gateway-server.js";
+import { operatorConfigFromEnv } from "../../packages/gateway/config/operator-config.js";
 import { createRemoteHttpApplication } from "../../packages/transports/http-sse/remote-http-application.js";
 
 const port = Number.parseInt(process.env.PORT ?? "0", 10);
@@ -25,6 +26,9 @@ if (serverInstances.length === 0) {
 
 const gateway = createHttpSseGatewayServer({
   serverInstances,
+  operatorConfig: operatorConfigFromEnv({
+    env: process.env,
+  }),
   loadThreshold,
   createApplication({ serverInstanceId }) {
     const baseUrl = remoteBaseUrls[serverInstanceId];
