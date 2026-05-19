@@ -50,26 +50,26 @@ export class LoadRouter {
     return { ...normalized };
   }
 
-  removeInstance(serverInstanceId) {
+  async removeInstance(serverInstanceId) {
     assertNonEmptyString(serverInstanceId, "serverInstanceId");
     this.#instances.delete(serverInstanceId);
-    this.#sessionRegistry.deleteByServer(serverInstanceId);
+    await this.#sessionRegistry.deleteByServer(serverInstanceId);
     this.#evaluateClusterPressure();
   }
 
-  routeSession(sessionId) {
+  async routeSession(sessionId) {
     return this.#routeSession(sessionId, { includeTrace: false });
   }
 
-  explainRoute(sessionId) {
+  async explainRoute(sessionId) {
     return this.#routeSession(sessionId, { includeTrace: true });
   }
 
-  #routeSession(sessionId, { includeTrace }) {
+  async #routeSession(sessionId, { includeTrace }) {
     assertNonEmptyString(sessionId, "sessionId");
     const trace = [];
 
-    const existing = this.#sessionRegistry.get(sessionId);
+    const existing = await this.#sessionRegistry.get(sessionId);
     trace.push({
       type: "lookup",
       sessionId,
@@ -115,7 +115,7 @@ export class LoadRouter {
       throw error;
     }
 
-    this.#sessionRegistry.assign(sessionId, selected.serverInstanceId);
+    await this.#sessionRegistry.assign(sessionId, selected.serverInstanceId);
     trace.push({
       type: "session-assigned",
       sessionId,

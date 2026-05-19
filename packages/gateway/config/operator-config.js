@@ -9,6 +9,9 @@ export const DEFAULT_GATEWAY_OPERATOR_CONFIG = Object.freeze({
   onDisconnect: "cancel",
   allowPublicBind: false,
   enforceStartupSecurityAudit: true,
+  sessionRegistryBackend: "memory",
+  sessionRegistryFilePath: undefined,
+  sessionRegistryRedisKey: "mcp:gateway:sessions",
 });
 
 export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
@@ -22,9 +25,13 @@ export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
   onDisconnect: "cancel",
   allowPublicBind: false,
   enforceStartupSecurityAudit: true,
+  sessionRegistryBackend: "file",
+  sessionRegistryFilePath: undefined,
+  sessionRegistryRedisKey: "mcp:gateway:sessions",
 });
 
 const ALLOWED_ON_DISCONNECT_VALUES = new Set(["cancel", "queue"]);
+const ALLOWED_SESSION_REGISTRY_BACKENDS = new Set(["memory", "file", "redis"]);
 
 export function resolveOperatorConfig({
   config = {},
@@ -43,6 +50,12 @@ export function resolveOperatorConfig({
     allowPublicBind: config.allowPublicBind ?? defaults.allowPublicBind,
     enforceStartupSecurityAudit:
       config.enforceStartupSecurityAudit ?? defaults.enforceStartupSecurityAudit,
+    sessionRegistryBackend:
+      config.sessionRegistryBackend ?? defaults.sessionRegistryBackend,
+    sessionRegistryFilePath:
+      config.sessionRegistryFilePath ?? defaults.sessionRegistryFilePath,
+    sessionRegistryRedisKey:
+      config.sessionRegistryRedisKey ?? defaults.sessionRegistryRedisKey,
   };
 
   validateOperatorConfig(resolved);
@@ -82,6 +95,15 @@ export function operatorConfigFromEnv({
         env.MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT ??
           env.MCP_OPERATOR_ENFORCE_STARTUP_SECURITY_AUDIT,
       ),
+      sessionRegistryBackend:
+        env.MCP_GATEWAY_SESSION_REGISTRY_BACKEND ??
+        env.MCP_OPERATOR_SESSION_REGISTRY_BACKEND,
+      sessionRegistryFilePath:
+        env.MCP_GATEWAY_SESSION_REGISTRY_FILE ??
+        env.MCP_OPERATOR_SESSION_REGISTRY_FILE,
+      sessionRegistryRedisKey:
+        env.MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY ??
+        env.MCP_OPERATOR_SESSION_REGISTRY_REDIS_KEY,
     },
   });
 }
@@ -142,6 +164,20 @@ function validateOperatorConfig(config) {
   if (typeof config.enforceStartupSecurityAudit !== "boolean") {
     throw new TypeError("enforceStartupSecurityAudit must be a boolean");
   }
+
+  if (!ALLOWED_SESSION_REGISTRY_BACKENDS.has(config.sessionRegistryBackend)) {
+    throw new RangeError('sessionRegistryBackend must be one of: "memory", "file", "redis"');
+  }
+
+  if (
+    config.sessionRegistryFilePath !== undefined &&
+    (typeof config.sessionRegistryFilePath !== "string" ||
+      config.sessionRegistryFilePath.trim().length === 0)
+  ) {
+    throw new TypeError("sessionRegistryFilePath must be a non-empty string when provided");
+  }
+
+  assertNonEmptyString(config.sessionRegistryRedisKey, "sessionRegistryRedisKey");
 }
 
 function parseOptionalNumber(value) {

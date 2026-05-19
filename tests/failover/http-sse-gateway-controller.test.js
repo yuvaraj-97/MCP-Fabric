@@ -20,7 +20,7 @@ test("gateway controller keeps a session sticky and publishes route events witho
   });
 
   const collector = createEventCollector();
-  controller.attachEventStream("session-test", collector);
+  await controller.attachEventStream("session-test", collector);
 
   const initialized = await controller.handleGatewayMessage({
     method: "initialize",
@@ -121,8 +121,8 @@ test("gateway controller reconnects within the grace period", async () => {
   });
 
   const collector = createEventCollector();
-  controller.attachEventStream(initialized.sessionId, collector);
-  controller.detachEventStream(initialized.sessionId, collector);
+  await controller.attachEventStream(initialized.sessionId, collector);
+  await controller.detachEventStream(initialized.sessionId, collector);
   clock.advance(200);
 
   const echoed = await controller.handleGatewayMessage({
@@ -151,8 +151,8 @@ test("gateway controller requires reinitialize after the reconnect grace period 
   });
 
   const collector = createEventCollector();
-  controller.attachEventStream(initialized.sessionId, collector);
-  controller.detachEventStream(initialized.sessionId, collector);
+  await controller.attachEventStream(initialized.sessionId, collector);
+  await controller.detachEventStream(initialized.sessionId, collector);
   clock.advance(101);
 
   await assert.rejects(
@@ -226,8 +226,8 @@ test("gateway controller queues a disconnect policy event when onDisconnect=queu
   });
 
   const firstCollector = createEventCollector();
-  controller.attachEventStream(initialized.sessionId, firstCollector);
-  controller.detachEventStream(initialized.sessionId, firstCollector);
+  await controller.attachEventStream(initialized.sessionId, firstCollector);
+  await controller.detachEventStream(initialized.sessionId, firstCollector);
 
   const queuedEvents = controller.listQueuedDisconnectEvents(initialized.sessionId);
   assert.equal(queuedEvents.length, 1);
@@ -235,7 +235,7 @@ test("gateway controller queues a disconnect policy event when onDisconnect=queu
   assert.equal(queuedEvents[0].payload.policy, "queue");
 
   const secondCollector = createEventCollector();
-  controller.attachEventStream(initialized.sessionId, secondCollector);
+  await controller.attachEventStream(initialized.sessionId, secondCollector);
 
   const replayed = secondCollector.chunks.join("");
   assert.match(replayed, /event: disconnect\.policy\.queued/);
@@ -262,8 +262,8 @@ test("gateway controller records cancel policy without queueing reconnect output
   });
 
   const collector = createEventCollector();
-  controller.attachEventStream(initialized.sessionId, collector);
-  controller.detachEventStream(initialized.sessionId, collector);
+  await controller.attachEventStream(initialized.sessionId, collector);
+  await controller.detachEventStream(initialized.sessionId, collector);
 
   assert.equal(controller.listQueuedDisconnectEvents(initialized.sessionId).length, 0);
   assert.ok(

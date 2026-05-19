@@ -4,37 +4,72 @@ import test from "node:test";
 import { createDashboardHandler } from "../../apps/local-dashboard/server.js";
 import { LocalDemoController } from "../../packages/gateway/demo/local-demo-controller.js";
 
-test("local demo controller keeps existing sessions sticky and reassigns unhealthy ones", () => {
+function createValidationControllerStub() {
+  return {
+    listScenarios() {
+      return [
+        { id: "filesystem-conversation", title: "Filesystem Conversation Validation" },
+        { id: "filesystem-openai-conversation", title: "Filesystem OpenAI Conversation Validation" },
+      ];
+    },
+    resetScenario(scenarioId) {
+      return { ok: true, scenarioId };
+    },
+    clearArtifacts() {
+      return { ok: true };
+    },
+    async runStep(scenarioId, stepId) {
+      return {
+        scenarioId,
+        stepId,
+        result: {
+          transport: "stdio",
+          assistantSummary: "stdio-connected MCP server responded successfully.",
+        },
+      };
+    },
+    async runStepStream(scenarioId, stepId, emit) {
+      emit({ type: "step.started", scenarioId, stepId });
+      const payload = await this.runStep(scenarioId, stepId);
+      emit({ type: "step.completed", payload });
+      return payload;
+    },
+  };
+}
+
+test("local demo controller keeps existing sessions sticky and reassigns unhealthy ones", async () => {
   const controller = new LocalDemoController();
 
-  const created = controller.createSession("session-1");
+  const created = await controller.createSession("session-1");
   const firstServer = created.decision.serverInstanceId;
 
-  const reused = controller.routeSession("session-1");
+  const reused = await controller.routeSession("session-1");
   assert.equal(reused.decision.serverInstanceId, firstServer);
   assert.equal(reused.decision.reusedExistingSession, true);
 
   controller.updateInstance(firstServer, { healthy: false, load: 0.9 });
-  const reassigned = controller.routeSession("session-1");
+  const reassigned = await controller.routeSession("session-1");
 
   assert.notEqual(reassigned.decision.serverInstanceId, firstServer);
   assert.equal(reassigned.decision.reusedExistingSession, false);
 });
 
-test("local demo controller skips overloaded instances for new sessions", () => {
+test("local demo controller skips overloaded instances for new sessions", async () => {
   const controller = new LocalDemoController();
 
   controller.updateInstance("server-a", { load: 0.95 });
   controller.updateInstance("server-b", { load: 0.91 });
   controller.updateInstance("server-c", { load: 0.3 });
 
-  const created = controller.createSession("session-overload-check");
+  const created = await controller.createSession("session-overload-check");
 
   assert.equal(created.decision.serverInstanceId, "server-c");
 });
 
 test("dashboard handler serves the UI shell and live state", async () => {
-  const handler = createDashboardHandler();
+  const handler = createDashboardHandler({
+    validationController: createValidationControllerStub(),
+  });
 
   const htmlResponse = await invokeHandler(handler, {
     method: "GET",
@@ -111,7 +146,9 @@ test("local demo controller honors custom operator config defaults", () => {
 });
 
 test("dashboard handler can create and use a real in-process runtime session", async () => {
-  const handler = createDashboardHandler();
+  const handler = createDashboardHandler({
+    validationController: createValidationControllerStub(),
+  });
 
   const createdResponse = await invokeHandler(handler, {
     method: "POST",
@@ -140,7 +177,9 @@ test("dashboard handler can create and use a real in-process runtime session", a
 });
 
 test("dashboard handler can restart the runtime gateway and reconnect a durable session", async () => {
-  const handler = createDashboardHandler();
+  const handler = createDashboardHandler({
+    validationController: createValidationControllerStub(),
+  });
 
   const createdResponse = await invokeHandler(handler, {
     method: "POST",
@@ -170,7 +209,9 @@ test("dashboard handler can restart the runtime gateway and reconnect a durable 
 });
 
 test("dashboard handler can simulate a disconnect and reconnect within grace", async () => {
-  const handler = createDashboardHandler();
+  const handler = createDashboardHandler({
+    validationController: createValidationControllerStub(),
+  });
 
   const createdResponse = await invokeHandler(handler, {
     method: "POST",
@@ -202,7 +243,9 @@ test("dashboard handler can simulate a disconnect and reconnect within grace", a
 });
 
 test("dashboard runtime state exposes operator observability counters and audit events", async () => {
-  const handler = createDashboardHandler();
+  const handler = createDashboardHandler({
+    validationController: createValidationControllerStub(),
+  });
 
   await invokeHandler(handler, {
     method: "POST",
@@ -221,7 +264,9 @@ test("dashboard runtime state exposes operator observability counters and audit 
 });
 
 test("dashboard exposes validation scenarios and can run a conversation step", async () => {
-  const handler = createDashboardHandler();
+  const handler = createDashboardHandler({
+    validationController: createValidationControllerStub(),
+  });
 
   const scenariosResponse = await invokeHandler(handler, {
     method: "GET",

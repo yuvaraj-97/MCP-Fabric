@@ -4,14 +4,14 @@ import test from "node:test";
 import { LoadRouter } from "../../packages/gateway/load-balancer/load-router.js";
 import { MemorySessionRegistry } from "../../packages/gateway/session-registry/memory-session-registry.js";
 
-test("assigns a new session to the least-loaded healthy instance", () => {
+test("assigns a new session to the least-loaded healthy instance", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry });
 
   router.upsertInstance({ serverInstanceId: "server-a", load: 0.4 });
   router.upsertInstance({ serverInstanceId: "server-b", load: 0.2 });
 
-  const route = router.routeSession("session-1");
+  const route = await router.routeSession("session-1");
 
   assert.deepEqual(route, {
     sessionId: "session-1",
@@ -21,7 +21,7 @@ test("assigns a new session to the least-loaded healthy instance", () => {
   assert.equal(registry.get("session-1").serverInstanceId, "server-b");
 });
 
-test("routes an existing session back to its assigned healthy instance", () => {
+test("routes an existing session back to its assigned healthy instance", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry });
 
@@ -29,7 +29,7 @@ test("routes an existing session back to its assigned healthy instance", () => {
   router.upsertInstance({ serverInstanceId: "server-b", load: 0.1 });
   registry.assign("session-1", "server-a");
 
-  const route = router.routeSession("session-1");
+  const route = await router.routeSession("session-1");
 
   assert.deepEqual(route, {
     sessionId: "session-1",
@@ -38,19 +38,19 @@ test("routes an existing session back to its assigned healthy instance", () => {
   });
 });
 
-test("does not assign new sessions to overloaded instances", () => {
+test("does not assign new sessions to overloaded instances", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry, loadThreshold: 0.7 });
 
   router.upsertInstance({ serverInstanceId: "server-a", load: 0.7 });
   router.upsertInstance({ serverInstanceId: "server-b", load: 0.2 });
 
-  const route = router.routeSession("session-1");
+  const route = await router.routeSession("session-1");
 
   assert.equal(route.serverInstanceId, "server-b");
 });
 
-test("keeps existing sessions sticky even when the assigned instance is over threshold", () => {
+test("keeps existing sessions sticky even when the assigned instance is over threshold", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry, loadThreshold: 0.7 });
 
@@ -58,13 +58,13 @@ test("keeps existing sessions sticky even when the assigned instance is over thr
   router.upsertInstance({ serverInstanceId: "server-b", load: 0.2 });
   registry.assign("session-1", "server-a");
 
-  const route = router.routeSession("session-1");
+  const route = await router.routeSession("session-1");
 
   assert.equal(route.serverInstanceId, "server-a");
   assert.equal(route.reusedExistingSession, true);
 });
 
-test("reassigns a session when the previous instance is unhealthy", () => {
+test("reassigns a session when the previous instance is unhealthy", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry });
 
@@ -72,7 +72,7 @@ test("reassigns a session when the previous instance is unhealthy", () => {
   router.upsertInstance({ serverInstanceId: "server-b", healthy: true, load: 0.2 });
   registry.assign("session-1", "server-a");
 
-  const route = router.routeSession("session-1");
+  const route = await router.routeSession("session-1");
 
   assert.deepEqual(route, {
     sessionId: "session-1",
@@ -82,27 +82,27 @@ test("reassigns a session when the previous instance is unhealthy", () => {
   assert.equal(registry.get("session-1").serverInstanceId, "server-b");
 });
 
-test("fails clearly when no instance can accept a new session", () => {
+test("fails clearly when no instance can accept a new session", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry, loadThreshold: 0.7 });
 
   router.upsertInstance({ serverInstanceId: "server-a", load: 0.8 });
   router.upsertInstance({ serverInstanceId: "server-b", healthy: false, load: 0.1 });
 
-  assert.throws(
+  await assert.rejects(
     () => router.routeSession("session-1"),
     /No healthy server instance is accepting new sessions/,
   );
 });
 
-test("explains routing decisions step by step for the demo dashboard", () => {
+test("explains routing decisions step by step for the demo dashboard", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({ sessionRegistry: registry, loadThreshold: 0.7 });
 
   router.upsertInstance({ serverInstanceId: "server-a", load: 0.65 });
   router.upsertInstance({ serverInstanceId: "server-b", load: 0.2 });
 
-  const decision = router.explainRoute("session-9");
+  const decision = await router.explainRoute("session-9");
 
   assert.equal(decision.serverInstanceId, "server-b");
   assert.equal(decision.reusedExistingSession, false);
@@ -113,7 +113,7 @@ test("explains routing decisions step by step for the demo dashboard", () => {
   assert.ok(decision.trace.some((entry) => entry.type === "session-assigned"));
 });
 
-test("auto scaler hook emits once when healthy average load crosses threshold", () => {
+test("auto scaler hook emits once when healthy average load crosses threshold", async () => {
   const registry = new MemorySessionRegistry();
   const events = [];
   const router = new LoadRouter({
@@ -135,7 +135,7 @@ test("auto scaler hook emits once when healthy average load crosses threshold", 
   assert.ok(events[0].averageLoad >= 0.8);
 });
 
-test("auto scaler hook resets after pressure drops below threshold", () => {
+test("auto scaler hook resets after pressure drops below threshold", async () => {
   const registry = new MemorySessionRegistry();
   const events = [];
   const router = new LoadRouter({
@@ -154,7 +154,7 @@ test("auto scaler hook resets after pressure drops below threshold", () => {
   assert.equal(events.length, 2);
 });
 
-test("auto scaler hook failures do not break routing", () => {
+test("auto scaler hook failures do not break routing", async () => {
   const registry = new MemorySessionRegistry();
   const router = new LoadRouter({
     sessionRegistry: registry,
@@ -167,6 +167,6 @@ test("auto scaler hook failures do not break routing", () => {
   router.upsertInstance({ serverInstanceId: "server-a", load: 0.9, healthy: true });
   router.upsertInstance({ serverInstanceId: "server-b", load: 0.2, healthy: true });
 
-  const route = router.routeSession("session-1");
+  const route = await router.routeSession("session-1");
   assert.equal(route.serverInstanceId, "server-b");
 });

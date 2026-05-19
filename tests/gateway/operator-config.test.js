@@ -37,6 +37,8 @@ test("operator config parses valid environment overrides", () => {
   assert.equal(config.onDisconnect, "cancel");
   assert.equal(config.allowPublicBind, false);
   assert.equal(config.enforceStartupSecurityAudit, true);
+  assert.equal(config.sessionRegistryBackend, "file");
+  assert.equal(config.sessionRegistryRedisKey, "mcp:gateway:sessions");
 });
 
 test("operator config parses a valid disconnect policy override", () => {
@@ -55,6 +57,20 @@ test("operator config parses a valid disconnect policy override", () => {
   assert.equal(config.autoScaleThreshold, 0.91);
   assert.equal(config.allowPublicBind, true);
   assert.equal(config.enforceStartupSecurityAudit, false);
+});
+
+test("operator config parses session registry backend overrides", () => {
+  const config = operatorConfigFromEnv({
+    env: {
+      MCP_GATEWAY_SESSION_REGISTRY_BACKEND: "redis",
+      MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: "mcp:custom:sessions",
+      MCP_GATEWAY_SESSION_REGISTRY_FILE: "/tmp/mcp-sessions.json",
+    },
+  });
+
+  assert.equal(config.sessionRegistryBackend, "redis");
+  assert.equal(config.sessionRegistryRedisKey, "mcp:custom:sessions");
+  assert.equal(config.sessionRegistryFilePath, "/tmp/mcp-sessions.json");
 });
 
 test("operator config rejects invalid threshold values", () => {
@@ -114,6 +130,30 @@ test("operator config rejects non-positive lifecycle and fleet values", () => {
         env: { MCP_GATEWAY_ALLOW_PUBLIC_BIND: "maybe" },
       }),
     /Expected a boolean environment value/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_SESSION_REGISTRY_BACKEND: "database" },
+      }),
+    /sessionRegistryBackend must be one of: "memory", "file", "redis"/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_SESSION_REGISTRY_FILE: "   " },
+      }),
+    /sessionRegistryFilePath must be a non-empty string when provided/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: "   " },
+      }),
+    /sessionRegistryRedisKey must be a non-empty string/,
   );
 });
 

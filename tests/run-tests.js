@@ -1,6 +1,8 @@
 import "./gateway/operator-config.test.js";
+import "./gateway/create-session-registry.test.js";
 import "./session-routing/memory-session-registry.test.js";
 import "./session-routing/file-session-registry.test.js";
+import "./session-routing/redis-session-registry.test.js";
 import "./session-routing/load-router.test.js";
 import "./validation/filesystem-validation.test.js";
 import "./validation/filesystem-conversation.test.js";
@@ -19,4 +21,5 @@ import "./transport-agnostic/stdio-http-controller-parity.test.js";
 import "./transport-agnostic/stdio-http-parity.test.js";
 import "./demo/local-dashboard.test.js";
 import "./failover/http-sse-gateway-controller.test.js";
+import "./failover/http-sse-shared-registry.test.js";
 import "./failover/http-sse-gateway.test.js";

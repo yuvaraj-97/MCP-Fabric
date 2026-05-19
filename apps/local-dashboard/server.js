@@ -73,12 +73,12 @@ export function createDashboardHandler({
 
       if (request.method === "POST" && url.pathname === "/api/sessions") {
         const body = await readJsonBody(request);
-        return writeJson(response, 200, controller.createSession(body.sessionId));
+        return writeJson(response, 200, await controller.createSession(body.sessionId));
       }
 
       if (request.method === "POST" && url.pathname === "/api/route") {
         const body = await readJsonBody(request);
-        return writeJson(response, 200, controller.routeSession(body.sessionId));
+        return writeJson(response, 200, await controller.routeSession(body.sessionId));
       }
 
       if (request.method === "POST" && url.pathname === "/api/runtime/sessions") {
@@ -93,7 +93,7 @@ export function createDashboardHandler({
 
       if (request.method === "POST" && url.pathname === "/api/runtime/disconnect") {
         const body = await readJsonBody(request);
-        return writeJson(response, 200, controller.disconnectRuntimeSession(body.sessionId));
+        return writeJson(response, 200, await controller.disconnectRuntimeSession(body.sessionId));
       }
 
       if (request.method === "POST" && url.pathname === "/api/runtime/restart") {

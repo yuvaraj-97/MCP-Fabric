@@ -189,12 +189,12 @@ export class LocalDemoController {
     };
   }
 
-  createSession(sessionId) {
+  async createSession(sessionId) {
     const normalizedSessionId = normalizeOptionalSessionId(sessionId) ?? `session-${this.#nextSessionNumber++}`;
     return this.#routeSession(normalizedSessionId, { mode: "create" });
   }
 
-  routeSession(sessionId) {
+  async routeSession(sessionId) {
     const normalizedSessionId = normalizeRequiredSessionId(sessionId);
     return this.#routeSession(normalizedSessionId, { mode: "route" });
   }
@@ -246,7 +246,7 @@ export class LocalDemoController {
       },
     });
 
-    this.#attachRuntimeCollector(result.sessionId);
+    await this.#attachRuntimeCollector(result.sessionId);
     this.#recordRuntimeEvent({
       kind: "runtime-session",
       title: `Initialized runtime session ${result.sessionId}`,
@@ -267,7 +267,7 @@ export class LocalDemoController {
 
   async echoRuntimeSession(sessionId, message) {
     const normalizedSessionId = normalizeRequiredSessionId(sessionId);
-    this.#attachRuntimeCollector(normalizedSessionId);
+    await this.#attachRuntimeCollector(normalizedSessionId);
     const result = await this.#runtimeController.handleGatewayMessage({
       method: "echo",
       sessionId: normalizedSessionId,
@@ -295,19 +295,19 @@ export class LocalDemoController {
     };
   }
 
-  disconnectRuntimeSession(sessionId) {
+  async disconnectRuntimeSession(sessionId) {
     const normalizedSessionId = normalizeRequiredSessionId(sessionId);
     const collector = this.#runtimeCollectors.get(normalizedSessionId);
     if (collector) {
-      this.#runtimeController.detachEventStream(normalizedSessionId, collector);
+      await this.#runtimeController.detachEventStream(normalizedSessionId, collector);
       this.#runtimeCollectors.delete(normalizedSessionId);
     } else {
-      this.#runtimeController.sessionRegistry.markDisconnected?.(normalizedSessionId, {
+      await this.#runtimeController.sessionRegistry.markDisconnected?.(normalizedSessionId, {
         gracePeriodMs: this.#operatorConfig.reconnectGracePeriodMs,
       });
     }
 
-    const record = this.#runtimeController.sessionRegistry.get(normalizedSessionId);
+    const record = await this.#runtimeController.sessionRegistry.get(normalizedSessionId);
     this.#recordRuntimeEvent({
       kind: "runtime-disconnect",
       title: `Disconnected runtime session ${normalizedSessionId}`,
@@ -340,9 +340,9 @@ export class LocalDemoController {
     return this.getState();
   }
 
-  #routeSession(sessionId, { mode }) {
+  async #routeSession(sessionId, { mode }) {
     try {
-      const decision = this.#router.explainRoute(sessionId);
+      const decision = await this.#router.explainRoute(sessionId);
       const title = mode === "create" ? `Created ${sessionId}` : `Routed ${sessionId}`;
       const summary = decision.reusedExistingSession
         ? `${sessionId} stayed on ${decision.serverInstanceId} because the assigned instance is still healthy.`
@@ -400,7 +400,7 @@ export class LocalDemoController {
     };
   }
 
-  #attachRuntimeCollector(sessionId) {
+  async #attachRuntimeCollector(sessionId) {
     if (this.#runtimeCollectors.has(sessionId)) {
       return this.#runtimeCollectors.get(sessionId);
     }
@@ -424,7 +424,7 @@ export class LocalDemoController {
       },
     };
     this.#runtimeCollectors.set(sessionId, collector);
-    this.#runtimeController.attachEventStream(sessionId, collector);
+    await this.#runtimeController.attachEventStream(sessionId, collector);
     return collector;
   }
 

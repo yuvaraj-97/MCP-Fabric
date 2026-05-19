@@ -5,7 +5,7 @@ import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-ap
 import { DEFAULT_GATEWAY_OPERATOR_CONFIG, resolveOperatorConfig } from "../../gateway/config/operator-config.js";
 import { LoadRouter } from "../../gateway/load-balancer/load-router.js";
 import { createGatewayObserver } from "../../gateway/observability/gateway-observer.js";
-import { MemorySessionRegistry } from "../../gateway/session-registry/memory-session-registry.js";
+import { createSessionRegistry } from "../../gateway/session-registry/create-session-registry.js";
 
 export function createHttpSseGatewayServer({
   serverInstances = [
@@ -21,6 +21,7 @@ export function createHttpSseGatewayServer({
   reconnectGracePeriodMs,
   onDisconnect,
   autoScalerHook,
+  redisClient,
   fetchImpl = globalThis.fetch,
   auditLogger = console,
   now = () => Date.now(),
@@ -40,6 +41,7 @@ export function createHttpSseGatewayServer({
     createApplication,
     operatorConfig: resolvedOperatorConfig,
     sessionRegistry,
+    redisClient,
     now,
   });
   const server = createServer(createGatewayHttpHandler({ controller }));
@@ -109,14 +111,14 @@ export function createGatewayHttpHandler({
         return sendJson(response, 200, {
           ok: true,
           instances: controller.router.listInstances(),
-          sessions: controller.sessionRegistry.list(),
+          sessions: await controller.sessionRegistry.list(),
         });
       }
 
       if (request.method === "GET" && url.pathname === "/sessions") {
         return sendJson(response, 200, {
           instances: controller.router.listInstances(),
-          sessions: controller.sessionRegistry.list(),
+          sessions: await controller.sessionRegistry.list(),
         });
       }
 
@@ -136,7 +138,7 @@ export function createGatewayHttpHandler({
           return sendJson(response, 400, { error: "sessionId is required" });
         }
 
-        const route = controller.attachEventStream(sessionId, response);
+        const route = await controller.attachEventStream(sessionId, response);
 
         response.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -154,7 +156,7 @@ export function createGatewayHttpHandler({
         }
 
         request.on?.("close", () => {
-          controller.detachEventStream(sessionId, response);
+          void controller.detachEventStream(sessionId, response);
         });
 
         return;
@@ -197,6 +199,7 @@ export function createHttpSseGatewayController({
   sessionTtlMs,
   reconnectGracePeriodMs,
   onDisconnect,
+  redisClient,
   now = () => Date.now(),
 } = {}) {
   const resolvedOperatorConfig = resolveOperatorConfig({
@@ -219,7 +222,15 @@ export function createHttpSseGatewayController({
     allowPublicBind: effectiveAllowPublicBind,
     enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
   } = resolvedOperatorConfig;
-  const resolvedSessionRegistry = sessionRegistry ?? new MemorySessionRegistry({ now });
+  const resolvedSessionRegistry =
+    sessionRegistry ??
+    createSessionRegistry({
+      backend: resolvedOperatorConfig.sessionRegistryBackend,
+      filePath: resolvedOperatorConfig.sessionRegistryFilePath,
+      now,
+      redisClient,
+      redisKey: resolvedOperatorConfig.sessionRegistryRedisKey,
+    });
   const router = new LoadRouter({
     sessionRegistry: resolvedSessionRegistry,
     loadThreshold: effectiveLoadThreshold,
@@ -263,6 +274,10 @@ export function createHttpSseGatewayController({
           typeof resolvedSessionRegistry.filePath === "function"
             ? resolvedSessionRegistry.filePath()
             : undefined,
+        redisKey:
+          typeof resolvedSessionRegistry.redisKey === "function"
+            ? resolvedSessionRegistry.redisKey()
+            : undefined,
       };
     },
     describeObservability() {
@@ -285,8 +300,8 @@ export function createHttpSseGatewayController({
 
       return updated;
     },
-    attachEventStream(sessionId, response) {
-      const record = resolvedSessionRegistry.get(sessionId);
+    async attachEventStream(sessionId, response) {
+      const record = await resolvedSessionRegistry.get(sessionId);
       if (!record) {
         addEventStream(eventStreams, sessionId, response);
         observer.record("stream.attached", {
@@ -299,7 +314,7 @@ export function createHttpSseGatewayController({
 
       const reconnectState = deriveReconnectState(record, now());
       if (reconnectState === "grace-expired") {
-        resolvedSessionRegistry.delete(sessionId);
+        await resolvedSessionRegistry.delete(sessionId);
         throw createGatewaySessionError({
           sessionId,
           code: "reconnect-grace-expired",
@@ -332,12 +347,13 @@ export function createHttpSseGatewayController({
         queuedDisconnectEvents: queuedEvents,
       };
     },
-    detachEventStream(sessionId, response) {
+    async detachEventStream(sessionId, response) {
       removeEventStream(eventStreams, sessionId, response);
       if (!hasActiveEventStream(eventStreams, sessionId)) {
-        resolvedSessionRegistry.markDisconnected?.(sessionId, {
+        await resolvedSessionRegistry.markDisconnected?.(sessionId, {
           gracePeriodMs: effectiveReconnectGracePeriodMs,
         });
+        const record = await resolvedSessionRegistry.get(sessionId);
         applyDisconnectPolicy({
           eventStreams,
           observer,
@@ -345,7 +361,7 @@ export function createHttpSseGatewayController({
           response,
           sessionId,
           policy: effectiveOnDisconnect,
-          serverInstanceId: resolvedSessionRegistry.get(sessionId)?.serverInstanceId ?? null,
+          serverInstanceId: record?.serverInstanceId ?? null,
         });
       }
       observer.record("stream.detached", {
@@ -354,10 +370,12 @@ export function createHttpSseGatewayController({
       });
     },
     async handleGatewayMessage(body) {
-      resolvedSessionRegistry.pruneExpired?.();
+      await resolvedSessionRegistry.pruneExpired?.();
       const method = body.method;
       const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
-      const existingSessionRecord = sessionId ? resolvedSessionRegistry.get(sessionId) : undefined;
+      const existingSessionRecord = sessionId
+        ? await resolvedSessionRegistry.get(sessionId)
+        : undefined;
       const requestNow = now();
       observer.record("request.received", {
         method,
@@ -381,7 +399,7 @@ export function createHttpSseGatewayController({
 
       const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
       if (method !== "initialize" && reconnectState === "grace-expired") {
-        resolvedSessionRegistry.delete(sessionId);
+        await resolvedSessionRegistry.delete(sessionId);
         observer.record("request.rejected", {
           method,
           sessionId,
@@ -395,7 +413,7 @@ export function createHttpSseGatewayController({
         });
       }
 
-      const route = router.routeSession(sessionId);
+      const route = await router.routeSession(sessionId);
       const application = applications.get(route.serverInstanceId);
       let recoveryAction = determineRecoveryAction({
         method,
@@ -461,7 +479,7 @@ export function createHttpSseGatewayController({
         }),
       );
       const result = assertGatewayResult(envelope);
-      resolvedSessionRegistry.assign(
+      await resolvedSessionRegistry.assign(
         sessionId,
         route.serverInstanceId,
         buildLifecycleMetadata({
