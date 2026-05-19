@@ -24,6 +24,7 @@
             <h2>Scenario</h2>
             <p>Select which MCP workload you want to validate, then choose the deterministic or OpenAI-backed conversation mode when that target offers both.</p>
           </div>
+          <div id="scenario-summary" class="stack"></div>
           <div class="controls">
             <label class="selector-field">
               <span>MCP target</span>
@@ -36,6 +37,15 @@
             <button id="refresh-button" class="button">Refresh scenarios</button>
             <button id="reset-button" class="button button-ghost">Reset selected scenario</button>
             <button id="cleanup-button" class="button button-ghost">Remove validation artifacts</button>
+          </div>
+          <div class="panel-header">
+            <h2>Coverage matrix</h2>
+            <p>Every target has a deterministic no-key path. OpenAI-backed paths are shown alongside them and become runnable automatically when the API key is present.</p>
+          </div>
+          <div id="coverage-matrix" class="stack"></div>
+          <div class="panel-header">
+            <h2>Mode cards</h2>
+            <p>These are the concrete scenario variants for the selected target. Pick one to drive the step-by-step walkthrough below.</p>
           </div>
           <div id="scenario-list" class="stack"></div>
         </section>

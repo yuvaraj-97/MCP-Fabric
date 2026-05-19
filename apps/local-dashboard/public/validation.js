@@ -15,6 +15,8 @@ const state = {
 };
 
 const elements = {
+  scenarioSummary: document.querySelector("#scenario-summary"),
+  coverageMatrix: document.querySelector("#coverage-matrix"),
   scenarioList: document.querySelector("#scenario-list"),
   conversationStream: document.querySelector("#conversation-stream"),
   stepsList: document.querySelector("#steps-list"),
@@ -101,7 +103,9 @@ function render() {
     state.selectedScenarioId = selectedScenario.id;
   }
 
+  renderScenarioSummary(selectedScenario);
   renderScenarios(selectedScenario);
+  renderCoverageMatrix(selectedScenario);
   renderSelectors(selectedScenario);
   renderLiveStatus(selectedScenario);
   renderConversationStream(selectedScenario);
@@ -154,6 +158,7 @@ function renderScenarios(selectedScenario) {
               ? `<span class="mono">disabled</span> ${escapeHtml(scenario.disabledReason || "")}`
               : `<span class="mono">ready</span>`
           }</p>
+          <p><strong>Mode:</strong> ${escapeHtml(modeLabelForScenario(scenario))}</p>
           ${
             scenario.provider
               ? `<p><strong>Provider:</strong> ${escapeHtml(`${scenario.provider.name} (${scenario.provider.model})`)}</p>`
@@ -173,6 +178,106 @@ function renderScenarios(selectedScenario) {
       await refresh();
     });
   }
+}
+
+function renderScenarioSummary(selectedScenario) {
+  if (!selectedScenario) {
+    elements.scenarioSummary.innerHTML = "<p>No validation scenarios are available.</p>";
+    return;
+  }
+
+  const targetScenarios = state.scenarios.filter(
+    (scenario) => scenario.targetId === selectedScenario.targetId,
+  );
+  const totalSteps = targetScenarios.reduce((sum, scenario) => sum + scenario.steps.length, 0);
+  const completedSteps = targetScenarios.reduce(
+    (sum, scenario) => sum + (scenario.results?.length ?? 0),
+    0,
+  );
+  const openAiScenario = targetScenarios.find((scenario) => Boolean(scenario.provider));
+  const deterministicScenario = targetScenarios.find((scenario) => !scenario.provider);
+
+  elements.scenarioSummary.innerHTML = `
+    <article class="event-item">
+      <h3>${escapeHtml(selectedScenario.targetLabel)} validation coverage</h3>
+      <p>This target exposes both a deterministic no-key flow and an OpenAI-backed flow. The deterministic path is always available. The OpenAI path is enabled only when the key is present.</p>
+      ${renderKeyValueList([
+        ["Target", selectedScenario.targetLabel],
+        ["Total test cases on this page", String(totalSteps)],
+        ["Completed so far", `${completedSteps}/${totalSteps}`],
+        [
+          "Deterministic mode",
+          deterministicScenario ? `${deterministicScenario.steps.length} steps, always runnable` : "not available",
+        ],
+        [
+          "OpenAI mode",
+          openAiScenario
+            ? openAiScenario.available === false
+              ? `disabled: ${openAiScenario.disabledReason}`
+              : `${openAiScenario.steps.length} steps, ready with API key`
+            : "not available",
+        ],
+      ])}
+    </article>
+  `;
+}
+
+function renderCoverageMatrix(selectedScenario) {
+  const targets = uniqueTargets(state.scenarios);
+  elements.coverageMatrix.innerHTML = targets
+    .map((target) => {
+      const scenarios = state.scenarios.filter((scenario) => scenario.targetId === target.targetId);
+      return `
+        <article class="event-item">
+          <h3>${escapeHtml(target.targetLabel)}</h3>
+          <p>${escapeHtml(targetCoverageSummary(scenarios))}</p>
+          <div class="stack">
+            ${scenarios
+              .map(
+                (scenario) => `
+                  <details class="disclosure" ${
+                    selectedScenario?.id === scenario.id ? "open" : ""
+                  }>
+                    <summary>${escapeHtml(modeLabelForScenario(scenario))} ${
+                      scenario.available === false ? "(disabled)" : "(ready)"
+                    }</summary>
+                    <div class="disclosure-body">
+                      <p>${escapeHtml(scenario.audience)}</p>
+                      ${
+                        scenario.provider
+                          ? `<p><strong>Provider:</strong> ${escapeHtml(
+                              `${scenario.provider.name} (${scenario.provider.model})`,
+                            )}</p>`
+                          : "<p><strong>Provider:</strong> Built-in deterministic runner</p>"
+                      }
+                      ${
+                        scenario.available === false
+                          ? `<p><strong>Availability:</strong> ${escapeHtml(scenario.disabledReason || "disabled")}</p>`
+                          : "<p><strong>Availability:</strong> ready</p>"
+                      }
+                      <p><strong>Step coverage:</strong></p>
+                      <ol class="stack">
+                        ${scenario.steps
+                          .map(
+                            (step) => `
+                              <li>
+                                <strong>${escapeHtml(step.title)}</strong><br>
+                                <span>${escapeHtml(step.whatTesting)}</span>
+                              </li>
+                            `,
+                          )
+                          .join("")}
+                      </ol>
+                    </div>
+                  </details>
+                `,
+              )
+              .join("")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderConversationStream(scenario) {
@@ -687,4 +792,28 @@ function chooseDefaultScenarioForTarget(targetId) {
     matching.find((scenario) => scenario.provider && scenario.available !== false) ||
     matching[0]
   );
+}
+
+function modeLabelForScenario(scenario) {
+  return scenario.provider ? "OpenAI-backed conversation mode" : "Deterministic no-key mode";
+}
+
+function targetCoverageSummary(scenarios) {
+  const deterministic = scenarios.find((scenario) => !scenario.provider);
+  const openai = scenarios.find((scenario) => Boolean(scenario.provider));
+  const parts = [];
+
+  if (deterministic) {
+    parts.push(`without API key: ${deterministic.steps.length} steps`);
+  }
+
+  if (openai) {
+    parts.push(
+      openai.available === false
+        ? `with API key: disabled now (${openai.disabledReason})`
+        : `with API key: ${openai.steps.length} steps ready`,
+    );
+  }
+
+  return parts.join(" | ");
 }
