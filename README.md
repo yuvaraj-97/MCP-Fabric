@@ -224,6 +224,10 @@ Use the other demos when you want a narrower transport-specific deep dive.
 | Local load generator | `npm run demo:load:local` | targets `3001` | Put pressure on the multi-instance gateway demo |
 | Filesystem validation harness | `npm run validate:filesystem` | none | Headless validation of the same filesystem-style MCP app over `stdio` and gateway-backed HTTP/SSE |
 | Filesystem multi-container proof | `npm run validate:filesystem:multicontainer` | dynamic local ports | Canonical headless proof against a real HTTP gateway process with separate remote MCP server processes |
+| Git validation harness | `npm run validate:git` | none | Headless validation of the same git-style MCP app over `stdio` and gateway-backed HTTP/SSE |
+| Git multi-container proof | `npm run validate:git:multicontainer` | dynamic local ports | Remote proof against a real HTTP gateway process with separate remote git MCP server processes |
+| Memory validation harness | `npm run validate:memory` | none | Headless validation of the same memory-style MCP app over `stdio` and gateway-backed HTTP/SSE |
+| Memory multi-container proof | `npm run validate:memory:multicontainer` | dynamic local ports | Remote proof that remembered facts survive reassignment because remote servers share a backing store |
 | Filesystem conversation validation | `npm run validate:filesystem:conversation` | none | Headless scripted conversation proving the same app behavior over `stdio` and gateway-backed HTTP/SSE |
 | Filesystem OpenAI conversation validation | `npm run validate:filesystem:openai` | none | Headless tool-calling OpenAI conversation using the same validation workload |
 
@@ -252,6 +256,85 @@ This is the first target in the real-world validation order:
 1. `filesystem`
 2. `git`
 3. `memory`
+
+## Run Git Validation
+
+```sh
+npm run validate:git
+```
+
+This headless validation harness proves:
+
+- the same git-style MCP application code runs over `stdio`
+- the same application code runs through the HTTP/SSE gateway
+- sticky routing works for follow-up requests
+- unhealthy-instance reassignment still preserves the shared repository state
+- staged git changes remain visible after reassignment
+
+## Run Git Multi-Container Proof
+
+```sh
+npm run validate:git:multicontainer
+```
+
+This remote proof uses:
+
+- one client process
+- one gateway process
+- two separate remote git MCP server processes
+- real HTTP traffic between those runtimes
+
+It creates:
+
+```text
+validation-artifacts/git-multicontainer/notes/git-multicontainer-change.txt
+```
+
+Docker version:
+
+```sh
+docker compose -f validation/git/compose.yaml up --abort-on-container-exit client
+```
+
+## Run Memory Validation
+
+```sh
+npm run validate:memory
+```
+
+This headless validation harness proves:
+
+- the same memory-style MCP application code runs over `stdio`
+- the same application code runs through the HTTP/SSE gateway
+- sticky routing works for follow-up requests
+- unhealthy-instance reassignment still preserves the remembered fact
+- shared memory state remains visible across server instances
+
+## Run Memory Multi-Container Proof
+
+```sh
+npm run validate:memory:multicontainer
+```
+
+This remote proof uses:
+
+- one client process
+- one gateway process
+- two separate remote memory MCP server processes
+- one shared backing store file outside either server process
+- real HTTP traffic between those runtimes
+
+It creates:
+
+```text
+validation-artifacts/memory-multicontainer/memory-store.json
+```
+
+Docker version:
+
+```sh
+docker compose -f validation/memory/compose.multicontainer.yaml up --abort-on-container-exit client
+```
 
 ## Run Filesystem Multi-Container Proof
 

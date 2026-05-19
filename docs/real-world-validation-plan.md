@@ -194,6 +194,102 @@ Treat `validation/multicontainer/` as the canonical proof implementation. That
 directory contains the harness, runtime entrypoints, compose file, and
 operator-facing instructions for the filesystem-first remote proof.
 
+### Current git remote proof
+
+The repo now also includes a headless git proof that drives the same remote
+gateway pattern against separate remote git MCP server processes.
+
+Run it locally with:
+
+```sh
+npm run validate:git:multicontainer
+```
+
+That command starts:
+
+- one client process
+- one gateway process
+- two remote git MCP server processes
+
+It verifies:
+
+- sticky routing for an existing session
+- unhealthy-instance reassignment
+- visible staged git state after reassignment
+- visible repository artifacts in shared workspace snapshots across the remote servers
+
+Created artifact:
+
+```text
+validation-artifacts/git-multicontainer/notes/git-multicontainer-change.txt
+```
+
+The proof report includes:
+
+- gateway base URL
+- remote server base URLs
+- MCP initialize and tool-call results
+- gateway `/sessions` and `/observability` snapshots
+- direct `/workspace` snapshots from the remote servers
+
+For a Docker-based topology, use:
+
+```sh
+docker compose -f validation/git/compose.yaml up --abort-on-container-exit client
+```
+
+Treat `validation/git/` as the canonical proof implementation for the remote
+git validation target.
+
+### Current memory remote proof
+
+The repo now also includes a headless memory proof that drives the same remote
+gateway pattern against separate remote memory MCP server processes backed by
+one shared store file.
+
+Run it locally with:
+
+```sh
+npm run validate:memory:multicontainer
+```
+
+That command starts:
+
+- one client process
+- one gateway process
+- two remote memory MCP server processes
+
+It verifies:
+
+- sticky routing for an existing session
+- unhealthy-instance reassignment
+- visible remembered facts after reassignment
+- visible shared-state continuity outside either remote server process
+
+Created artifact:
+
+```text
+validation-artifacts/memory-multicontainer/memory-store.json
+```
+
+The proof report includes:
+
+- gateway base URL
+- remote server base URLs
+- MCP initialize and tool-call results
+- gateway `/sessions` and `/observability` snapshots
+- direct `/memory` snapshots from the remote servers
+- the persisted backing-store snapshot read from disk
+
+For a Docker-based topology, use:
+
+```sh
+docker compose -f validation/memory/compose.multicontainer.yaml up --abort-on-container-exit client
+```
+
+Treat `validation/memory/` as the canonical proof implementation for the remote
+memory validation target.
+
 ### Laptop-friendly first pass
 
 Before moving to containers or separate hosts, the same validation flow should
@@ -260,6 +356,14 @@ For the current filesystem remote proof, also capture:
 - gateway `/observability` summary
 - direct `/workspace` snapshots from both remote servers
 
+For the current memory remote proof, also capture:
+
+- shared store file path
+- gateway `/sessions` snapshot
+- gateway `/observability` summary
+- direct `/memory` snapshots from both remote servers
+- the persisted backing-store snapshot after reassignment
+
 ## Suggested Test Matrix
 
 | Scenario | Expected Result |
@@ -289,6 +393,12 @@ Current status:
 - canonical proof directory: `validation/multicontainer/`
 - Docker topology file: `validation/multicontainer/compose.yaml`
 - CLI client proof: `npm run validate:filesystem:multicontainer`
+- chosen second target: `git`
+- canonical git proof directory: `validation/git/`
+- CLI git proof: `npm run validate:git:multicontainer`
+- chosen third target: `memory`
+- canonical memory proof directory: `validation/memory/`
+- CLI memory proof: `npm run validate:memory:multicontainer`
 
 ## Success Criteria
 

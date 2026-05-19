@@ -1,0 +1,53 @@
+services:
+  mcp-server-a:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../../:/workspace
+    environment:
+      PORT: "4301"
+      ROOT_DIR: /workspace/validation-artifacts/git-multicontainer
+      SERVER_INSTANCE_ID: git-a
+    command: ["node", "validation/git/remote-server.js"]
+
+  mcp-server-b:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../../:/workspace
+    environment:
+      PORT: "4302"
+      ROOT_DIR: /workspace/validation-artifacts/git-multicontainer
+      SERVER_INSTANCE_ID: git-b
+    command: ["node", "validation/git/remote-server.js"]
+
+  gateway:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../../:/workspace
+    depends_on:
+      - mcp-server-a
+      - mcp-server-b
+    environment:
+      PORT: "4400"
+      LOAD_THRESHOLD: "0.8"
+      SERVER_INSTANCES_JSON: >-
+        [{"serverInstanceId":"git-a","load":0.12,"healthy":true,"acceptingNewSessions":true},
+        {"serverInstanceId":"git-b","load":0.28,"healthy":true,"acceptingNewSessions":true}]
+      REMOTE_BASE_URLS_JSON: >-
+        {"git-a":"http://mcp-server-a:4301","git-b":"http://mcp-server-b:4302"}
+    command: ["node", "validation/multicontainer/remote-gateway.js"]
+
+  client:
+    image: node:20
+    working_dir: /workspace
+    volumes:
+      - ../../:/workspace
+    depends_on:
+      - gateway
+    environment:
+      MCP_GIT_MULTICONTAINER_GATEWAY_URL: http://gateway:4400
+      MCP_GIT_MULTICONTAINER_SERVER_URLS: git-a=http://mcp-server-a:4301,git-b=http://mcp-server-b:4302
+      MCP_GIT_MULTICONTAINER_KEEP_ARTIFACTS: "1"
+    command: ["node", "validation/git/run-multicontainer-proof.js"]

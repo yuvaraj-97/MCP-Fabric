@@ -17,6 +17,10 @@
     "validate:filesystem:multicontainer": "node validation/multicontainer/run-filesystem-proof.js",
     "validate:filesystem:conversation": "node validation/filesystem/run-conversation.js",
     "validate:filesystem:openai": "node validation/filesystem/run-openai-conversation.js",
+    "validate:git": "node validation/git/run-validation.js",
+    "validate:git:multicontainer": "node validation/git/run-multicontainer-proof.js",
+    "validate:memory": "node validation/memory/run-validation.js",
+    "validate:memory:multicontainer": "node validation/memory/run-multicontainer-proof.js",
     "check": "npm test"
   },
   "engines": {

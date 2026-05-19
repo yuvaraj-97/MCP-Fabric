@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { McpApplicationServer } from "../../packages/core/protocol-adapter/mcp-application-server.js";
 
@@ -228,6 +230,162 @@ export function createMemoryValidationStore() {
     }
     return bucket;
   }
+}
+
+export function createFileBackedMemoryValidationStore({ filePath }) {
+  if (typeof filePath !== "string" || filePath.trim().length === 0) {
+    throw new TypeError("filePath must be a non-empty string");
+  }
+
+  ensureStoreFile(filePath);
+
+  return {
+    remember({ namespace, key, value }) {
+      assertNonEmptyString(namespace, "namespace");
+      assertNonEmptyString(key, "key");
+      assertNonEmptyString(value, "value");
+
+      const state = readState(filePath);
+      const bucket = getOrCreateStateNamespace(state, namespace);
+      const existing = bucket.entries.find((entry) => entry.key === key);
+      const record = {
+        namespace,
+        key,
+        value,
+        entryId: existing?.entryId ?? randomUUID(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      bucket.entries = bucket.entries.filter((entry) => entry.key !== key);
+      bucket.entries.push(record);
+      bucket.entries.sort((left, right) => left.key.localeCompare(right.key));
+      writeState(filePath, state);
+      return { ...record };
+    },
+    recall({ namespace, key }) {
+      assertNonEmptyString(namespace, "namespace");
+      assertNonEmptyString(key, "key");
+
+      const state = readState(filePath);
+      const bucket = state.namespaces.find((entry) => entry.namespace === namespace);
+      const record = bucket?.entries.find((entry) => entry.key === key);
+
+      return {
+        namespace,
+        key,
+        found: Boolean(record),
+        value: record?.value ?? null,
+        entryId: record?.entryId ?? null,
+      };
+    },
+    list({ namespace }) {
+      assertNonEmptyString(namespace, "namespace");
+
+      const state = readState(filePath);
+      const bucket = state.namespaces.find((entry) => entry.namespace === namespace);
+      const entries = bucket
+        ? bucket.entries.map((record) => ({
+            key: record.key,
+            value: record.value,
+            entryId: record.entryId,
+            updatedAt: record.updatedAt,
+          }))
+        : [];
+
+      return {
+        namespace,
+        count: entries.length,
+        entries,
+      };
+    },
+    forget({ namespace, key }) {
+      assertNonEmptyString(namespace, "namespace");
+      assertNonEmptyString(key, "key");
+
+      const state = readState(filePath);
+      const bucket = state.namespaces.find((entry) => entry.namespace === namespace);
+      let deleted = false;
+
+      if (bucket) {
+        const before = bucket.entries.length;
+        bucket.entries = bucket.entries.filter((entry) => entry.key !== key);
+        deleted = before !== bucket.entries.length;
+      }
+
+      state.namespaces = state.namespaces.filter((entry) => entry.entries.length > 0);
+      writeState(filePath, state);
+
+      return {
+        namespace,
+        key,
+        deleted,
+      };
+    },
+    snapshot() {
+      return readState(filePath).namespaces.map((bucket) => ({
+        namespace: bucket.namespace,
+        entries: bucket.entries.map((record) => ({
+          key: record.key,
+          value: record.value,
+          entryId: record.entryId,
+          updatedAt: record.updatedAt,
+        })),
+      }));
+    },
+  };
+}
+
+function ensureStoreFile(filePath) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  try {
+    readState(filePath);
+  } catch {
+    writeState(filePath, { namespaces: [] });
+  }
+}
+
+function readState(filePath) {
+  const raw = readFileSync(filePath, "utf8");
+  const parsed = raw.trim().length > 0 ? JSON.parse(raw) : { namespaces: [] };
+  return normalizeState(parsed);
+}
+
+function writeState(filePath, state) {
+  writeFileSync(filePath, JSON.stringify(normalizeState(state), null, 2));
+}
+
+function normalizeState(state) {
+  const namespaces = Array.isArray(state?.namespaces) ? state.namespaces : [];
+  return {
+    namespaces: namespaces
+      .map((bucket) => ({
+        namespace: String(bucket.namespace ?? ""),
+        entries: Array.isArray(bucket.entries)
+          ? bucket.entries
+              .map((record) => ({
+                key: String(record.key ?? ""),
+                value: String(record.value ?? ""),
+                entryId: String(record.entryId ?? ""),
+                updatedAt: String(record.updatedAt ?? ""),
+              }))
+              .filter((record) => record.key.length > 0)
+              .sort((left, right) => left.key.localeCompare(right.key))
+          : [],
+      }))
+      .filter((bucket) => bucket.namespace.length > 0)
+      .sort((left, right) => left.namespace.localeCompare(right.namespace)),
+  };
+}
+
+function getOrCreateStateNamespace(state, namespace) {
+  let bucket = state.namespaces.find((entry) => entry.namespace === namespace);
+  if (!bucket) {
+    bucket = { namespace, entries: [] };
+    state.namespaces.push(bucket);
+    state.namespaces.sort((left, right) => left.namespace.localeCompare(right.namespace));
+  }
+
+  return bucket;
 }
 
 function assertNonEmptyString(value, name) {
