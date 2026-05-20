@@ -109,7 +109,8 @@ slice plus transport-specific runtime demos.
 ### Implemented
 
 - [`packages/core/protocol-adapter/mcp-application-server.js`](../packages/core/protocol-adapter/mcp-application-server.js)
-  provides a transport-neutral MCP-compatible request dispatcher.
+  provides a transport-neutral MCP-compatible request dispatcher backed by the
+  official `@modelcontextprotocol/sdk` for core MCP methods.
 - [`packages/core/session/session-context.js`](../packages/core/session/session-context.js)
   provides a shared session context shape for handlers.
 - [`packages/transports/stdio/stdio-transport.js`](../packages/transports/stdio/stdio-transport.js)
@@ -168,6 +169,8 @@ Missing pieces:
 - health/load reporting model for real instances
 - more complete observability and operator workflows
 - packaged standalone gateway runtime
+- official SDK adoption inside transport adapters if the repo later replaces the
+  current wrapper-based transport seams
 
 ## Advanced Future Enhancements
 

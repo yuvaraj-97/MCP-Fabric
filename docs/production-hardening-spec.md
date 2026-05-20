@@ -17,6 +17,12 @@ This document serves as the technical blueprint for hardening the MCP gateway fo
 **Objective:** Reduce maintenance burden by adopting the official standard.
 - **SDK Migration:** Replace custom JSON-RPC parsing (e.g., `validateIncomingMessage`, `createSuccessResponse`) in `McpApplicationServer` by installing and integrating the official `@modelcontextprotocol/sdk` NPM package.
 
+Status:
+
+- Completed for the reusable core request boundary in `McpApplicationServer`.
+- Built-in MCP methods now execute through the official SDK server/runtime.
+- Remaining repo-owned seams are transport wrappers and demo-specific custom methods, not the core MCP request dispatcher.
+
 ## 4. Authentication and Security
 **Objective:** Protect the gateway from unauthorized access and rogue instance registration.
 - **Startup Security Audit:** Enforce a startup check. If the gateway binds to `0.0.0.0` instead of `127.0.0.1`, log a critical `[SECURITY WARNING]`.

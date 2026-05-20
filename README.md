@@ -100,6 +100,8 @@ reusable core slice and local transport/gateway demos.
 The implemented slices today are:
 
 - reusable transport-neutral MCP application core
+- official `@modelcontextprotocol/sdk`-backed core request handling for
+  `initialize`, `ping`, `tools/list`, and `tools/call`
 - session context helper for shared handler execution
 - basic `stdio` adapter with framed JSON-RPC message handling
 - newline-delimited local `stdio` harness for transport parity checks
@@ -117,6 +119,12 @@ The implemented slices today are:
 
 External production-grade state backends, operator-friendly policy controls, and
 fuller gateway packaging are still the next recommended build steps.
+
+What still remains outside the official SDK path:
+
+- transport adapters are still repo-owned wrappers
+- demo-specific custom methods still run through the repo's registration layer
+- hot context checkpointing and migration are not implemented
 
 The concrete next-phase deployment proof is documented in
 [docs/real-world-validation-plan.md](./docs/real-world-validation-plan.md).

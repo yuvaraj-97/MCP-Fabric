@@ -1,16 +1,19 @@
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { createSessionContext } from "../session/session-context.js";
 import {
   ErrorCode,
   createErrorResponse,
   createSuccessResponse,
   isNotification,
-  toSdkEnvelope,
   validateIncomingMessage,
 } from "./jsonrpc-envelope.js";
 import {
-  CallToolRequestSchema,
   ListToolsRequestSchema,
   PingRequestSchema,
+  CallToolRequestSchema,
+  isJSONRPCErrorResponse,
+  isJSONRPCResultResponse,
 } from "@modelcontextprotocol/sdk/types.js";
 
 export class McpApplicationServer {
@@ -23,6 +26,11 @@ export class McpApplicationServer {
   #maxNotificationLogEntries;
   #notificationListeners = new Set();
   #notificationEventHook;
+  #sdkServer;
+  #sdkClientTransport;
+  #sdkReady;
+  #pendingSdkResponses = new Map();
+  #requestContexts = new Map();
 
   constructor({
     serverInfo = { name: "mcp-application-server", version: "0.1.0" },
@@ -44,6 +52,7 @@ export class McpApplicationServer {
     this.#instructions = instructions;
     this.#maxNotificationLogEntries = maxNotificationLogEntries;
     this.#notificationEventHook = onNotificationEvent ?? null;
+    this.#initializeSdkServer();
   }
 
   registerTool(definition) {
@@ -132,36 +141,15 @@ export class McpApplicationServer {
 
     switch (message.method) {
       case "initialize":
-        return {
-          protocolVersion: this.#protocolVersion,
-          serverInfo: { ...this.#serverInfo },
-          capabilities: {
-            tools: {
-              listChanged: false,
-            },
-          },
-          instructions: this.#instructions,
-        };
       case "ping":
-        validateSdkRequest(PingRequestSchema, message, "ping request");
-        return {
-          ok: true,
-          session: {
-            sessionId: context.sessionId,
-            clientId: context.clientId,
-            transport: context.transport,
-          },
-        };
       case "tools/list":
-        validateSdkRequest(ListToolsRequestSchema, message, "tools/list request");
-        return {
-          tools: this.listTools(),
-        };
       case "tools/call":
-        validateSdkRequest(CallToolRequestSchema, message, "tools/call request");
-        return this.#callTool(message.params, context);
+        return this.#dispatchSdkRequest(message, context);
       default:
-        throw createProtocolError(ErrorCode.MethodNotFound, `Unsupported MCP method: ${message.method}`);
+        throw createProtocolError(
+          ErrorCode.MethodNotFound,
+          `Unsupported MCP method: ${message.method}`,
+        );
     }
   }
 
@@ -236,6 +224,93 @@ export class McpApplicationServer {
       listener(cloneValue(event));
     }
   }
+
+  #initializeSdkServer() {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    this.#sdkClientTransport = clientTransport;
+    this.#sdkServer = new SdkServer(this.#serverInfo, {
+      capabilities: {
+        tools: {
+          listChanged: false,
+        },
+      },
+      instructions: this.#instructions,
+    });
+
+    this.#sdkServer.setRequestHandler(PingRequestSchema, (_request, extra) => {
+      const context = this.#requestContexts.get(extra.requestId);
+      return {
+        ok: true,
+        session: {
+          sessionId: context?.sessionId,
+          clientId: context?.clientId,
+          transport: context?.transport,
+        },
+      };
+    });
+
+    this.#sdkServer.setRequestHandler(ListToolsRequestSchema, () => {
+      return {
+        tools: this.listTools(),
+      };
+    });
+
+    this.#sdkServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+      const context = this.#requestContexts.get(extra.requestId);
+      return this.#callTool(request.params, context);
+    });
+
+    this.#sdkClientTransport.onmessage = (message) => {
+      if (!isJSONRPCResultResponse(message) && !isJSONRPCErrorResponse(message)) {
+        return;
+      }
+
+      const pending = this.#pendingSdkResponses.get(message.id);
+      if (!pending) {
+        return;
+      }
+
+      this.#pendingSdkResponses.delete(message.id);
+      this.#requestContexts.delete(message.id);
+      pending.resolve(message);
+    };
+
+    this.#sdkReady = Promise.all([
+      this.#sdkServer.connect(serverTransport),
+      this.#sdkClientTransport.start(),
+    ]);
+  }
+
+  async #dispatchSdkRequest(message, context) {
+    await this.#sdkReady;
+
+    const sdkMessage = normalizeSdkRequestMessage(message, {
+      protocolVersion: this.#protocolVersion,
+      serverInfo: this.#serverInfo,
+    });
+
+    return new Promise((resolve, reject) => {
+      this.#pendingSdkResponses.set(sdkMessage.id, { resolve, reject });
+      this.#requestContexts.set(sdkMessage.id, context);
+
+      this.#sdkClientTransport
+        .send(sdkMessage)
+        .catch((error) => {
+          this.#pendingSdkResponses.delete(sdkMessage.id);
+          this.#requestContexts.delete(sdkMessage.id);
+          reject(error);
+        });
+    }).then((response) => {
+      if (response.error) {
+        throw createProtocolError(
+          response.error.code ?? ErrorCode.InternalError,
+          response.error.message ?? "Internal error",
+        );
+      }
+
+      return response.result;
+    });
+  }
 }
 
 function renderToolText(name, structuredContent, context) {
@@ -248,18 +323,6 @@ function renderToolText(name, structuredContent, context) {
     null,
     2,
   );
-}
-
-function validateSdkRequest(schema, message, label) {
-  const result = schema.safeParse(toSdkEnvelope(message));
-  if (!result.success) {
-    throw createProtocolError(
-      ErrorCode.InvalidParams,
-      `${label} failed MCP SDK validation: ${result.error.issues[0]?.message ?? "invalid request"}`,
-    );
-  }
-
-  return result.data;
 }
 
 function normalizeToolDefinition(definition) {
@@ -313,6 +376,36 @@ function createProtocolError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function normalizeSdkRequestMessage(message, { protocolVersion, serverInfo }) {
+  if (message.method !== "initialize") {
+    return {
+      jsonrpc: message.jsonrpc,
+      id: message.id,
+      method: message.method,
+      params: cloneValue(message.params),
+    };
+  }
+
+  const params =
+    message.params && typeof message.params === "object" && !Array.isArray(message.params)
+      ? { ...message.params }
+      : {};
+
+  return {
+    jsonrpc: message.jsonrpc,
+    id: message.id,
+    method: message.method,
+    params: {
+      protocolVersion: params.protocolVersion ?? protocolVersion,
+      capabilities: params.capabilities ?? {},
+      clientInfo: params.clientInfo ?? {
+        name: `${serverInfo.name}-client`,
+        version: serverInfo.version,
+      },
+    },
+  };
 }
 
 function validateServerInfo(serverInfo) {
