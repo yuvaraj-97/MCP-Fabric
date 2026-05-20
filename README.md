@@ -123,7 +123,7 @@ fuller gateway packaging are still the next recommended build steps.
 What still remains outside the official SDK path:
 
 - transport adapters are still repo-owned wrappers
-- demo-specific custom methods still run through the repo's registration layer
+- outer response/envelope helpers still normalize repo-specific message flow
 - hot context checkpointing and migration are not implemented
 
 The concrete next-phase deployment proof is documented in

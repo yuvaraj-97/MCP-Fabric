@@ -1,5 +1,6 @@
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { z } from "zod";
 import { createSessionContext } from "../session/session-context.js";
 import {
   ErrorCode,
@@ -12,6 +13,7 @@ import {
   ListToolsRequestSchema,
   PingRequestSchema,
   CallToolRequestSchema,
+  RequestSchema,
   isJSONRPCErrorResponse,
   isJSONRPCResultResponse,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -21,7 +23,7 @@ export class McpApplicationServer {
   #protocolVersion;
   #instructions;
   #tools = new Map();
-  #methodHandlers = new Map();
+  #sdkMethods = new Set(["initialize", "ping", "tools/list", "tools/call"]);
   #notificationLog = [];
   #maxNotificationLogEntries;
   #notificationListeners = new Set();
@@ -67,7 +69,15 @@ export class McpApplicationServer {
       throw new TypeError("method handler must be a function");
     }
 
-    this.#methodHandlers.set(method, handler);
+    this.#sdkServer.setRequestHandler(createCustomRequestSchema(method), (request, extra) => {
+      const context = this.#requestContexts.get(extra.requestId);
+      return handler({
+        params: cloneValue(request.params ?? {}),
+        context,
+        message: cloneValue(request),
+      });
+    });
+    this.#sdkMethods.add(method);
     return method;
   }
 
@@ -130,27 +140,14 @@ export class McpApplicationServer {
   }
 
   async #dispatchRequest(message, context) {
-    const customHandler = this.#methodHandlers.get(message.method);
-    if (customHandler) {
-      return customHandler({
-        params: cloneValue(message.params ?? {}),
-        context,
-        message: cloneValue(message),
-      });
+    if (!this.#sdkMethods.has(message.method)) {
+      throw createProtocolError(
+        ErrorCode.MethodNotFound,
+        `Unsupported MCP method: ${message.method}`,
+      );
     }
 
-    switch (message.method) {
-      case "initialize":
-      case "ping":
-      case "tools/list":
-      case "tools/call":
-        return this.#dispatchSdkRequest(message, context);
-      default:
-        throw createProtocolError(
-          ErrorCode.MethodNotFound,
-          `Unsupported MCP method: ${message.method}`,
-        );
-    }
+    return this.#dispatchSdkRequest(message, context);
   }
 
   async #callTool(params, context) {
@@ -376,6 +373,13 @@ function createProtocolError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function createCustomRequestSchema(method) {
+  return RequestSchema.extend({
+    method: z.literal(method),
+    params: z.looseObject({}).optional(),
+  });
 }
 
 function normalizeSdkRequestMessage(message, { protocolVersion, serverInfo }) {

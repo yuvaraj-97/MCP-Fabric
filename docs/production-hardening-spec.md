@@ -21,7 +21,8 @@ Status:
 
 - Completed for the reusable core request boundary in `McpApplicationServer`.
 - Built-in MCP methods now execute through the official SDK server/runtime.
-- Remaining repo-owned seams are transport wrappers and demo-specific custom methods, not the core MCP request dispatcher.
+- Registered custom request methods now also execute through the SDK handler path.
+- Remaining repo-owned seams are transport wrappers and outer envelope normalization, not the core MCP request dispatcher.
 
 ## 4. Authentication and Security
 **Objective:** Protect the gateway from unauthorized access and rogue instance registration.
