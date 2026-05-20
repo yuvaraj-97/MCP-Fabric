@@ -1,11 +1,5 @@
 import { createDemoApplicationState } from "./demo-application-state.js";
 import { McpApplicationServer } from "./mcp-application-server.js";
-import {
-  createErrorResponse,
-  createSuccessResponse,
-  isNotification,
-  validateIncomingMessage,
-} from "./jsonrpc-envelope.js";
 
 export function createDemoApplicationServer({ serverInstanceId } = {}) {
   const state = createDemoApplicationState({ serverInstanceId });
@@ -44,33 +38,10 @@ export function createDemoApplicationServer({ serverInstanceId } = {}) {
     serverInstanceId: state.serverInstanceId,
     getSessionState: state.getSessionState,
     async handleMessage(message, context = {}) {
-      const messageValidationError = validateIncomingMessage(message);
-      if (messageValidationError) {
-        return createErrorResponse(null, -32600, messageValidationError);
-      }
-
-      if (isNotification(message)) {
-        return null;
-      }
-
-      try {
-        const result = await server.handleMessage(message, {
-          ...context,
-          sessionId: context.sessionId ?? message.sessionId,
-        });
-
-        if (!result) {
-          return null;
-        }
-
-        return result;
-      } catch (cause) {
-        return createErrorResponse(
-          message.id ?? null,
-          -32603,
-          cause instanceof Error ? cause.message : String(cause),
-        );
-      }
+      return server.handleMessage(message, {
+        ...context,
+        sessionId: context.sessionId ?? message.sessionId,
+      });
     },
   };
 }

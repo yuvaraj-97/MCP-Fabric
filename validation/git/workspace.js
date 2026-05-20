@@ -8,10 +8,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 
 export function createGitValidationWorkspace(name) {
-  const rootDir = resolve(process.cwd(), "validation-artifacts", name);
+  const rootDir = resolve(process.cwd(), "validation-artifacts", `${name}-${randomUUID()}`);
   rmSync(rootDir, { recursive: true, force: true });
   mkdirSync(rootDir, { recursive: true });
 

@@ -1,10 +1,17 @@
 import { createSessionContext } from "../session/session-context.js";
 import {
+  ErrorCode,
   createErrorResponse,
   createSuccessResponse,
   isNotification,
+  toSdkEnvelope,
   validateIncomingMessage,
 } from "./jsonrpc-envelope.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  PingRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 export class McpApplicationServer {
   #serverInfo;
@@ -91,7 +98,7 @@ export class McpApplicationServer {
   async handleMessage(message, contextInput = {}) {
     const messageValidationError = validateIncomingMessage(message);
     if (messageValidationError) {
-      return createErrorResponse(null, -32600, messageValidationError);
+      return createErrorResponse(null, ErrorCode.InvalidRequest, messageValidationError);
     }
 
     const context = createSessionContext(contextInput);
@@ -107,7 +114,7 @@ export class McpApplicationServer {
     } catch (error) {
       return createErrorResponse(
         message.id,
-        error.code ?? -32603,
+        error.code ?? ErrorCode.InternalError,
         error.message ?? "Internal error",
       );
     }
@@ -136,6 +143,7 @@ export class McpApplicationServer {
           instructions: this.#instructions,
         };
       case "ping":
+        validateSdkRequest(PingRequestSchema, message, "ping request");
         return {
           ok: true,
           session: {
@@ -145,31 +153,33 @@ export class McpApplicationServer {
           },
         };
       case "tools/list":
+        validateSdkRequest(ListToolsRequestSchema, message, "tools/list request");
         return {
           tools: this.listTools(),
         };
       case "tools/call":
+        validateSdkRequest(CallToolRequestSchema, message, "tools/call request");
         return this.#callTool(message.params, context);
       default:
-        throw createProtocolError(-32601, `Unsupported MCP method: ${message.method}`);
+        throw createProtocolError(ErrorCode.MethodNotFound, `Unsupported MCP method: ${message.method}`);
     }
   }
 
   async #callTool(params, context) {
     if (!params || typeof params !== "object" || Array.isArray(params)) {
-      throw createProtocolError(-32602, "tools/call params must be an object");
+      throw createProtocolError(ErrorCode.InvalidParams, "tools/call params must be an object");
     }
 
     const { name, arguments: toolArguments = {} } = params;
     assertNonEmptyString(name, "tool name");
 
     if (!toolArguments || typeof toolArguments !== "object" || Array.isArray(toolArguments)) {
-      throw createProtocolError(-32602, "tool arguments must be an object");
+      throw createProtocolError(ErrorCode.InvalidParams, "tool arguments must be an object");
     }
 
     const tool = this.#tools.get(name);
     if (!tool) {
-      throw createProtocolError(-32601, `Unknown tool: ${name}`);
+      throw createProtocolError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
 
     const structuredContent = await tool.handler({
@@ -238,6 +248,18 @@ function renderToolText(name, structuredContent, context) {
     null,
     2,
   );
+}
+
+function validateSdkRequest(schema, message, label) {
+  const result = schema.safeParse(toSdkEnvelope(message));
+  if (!result.success) {
+    throw createProtocolError(
+      ErrorCode.InvalidParams,
+      `${label} failed MCP SDK validation: ${result.error.issues[0]?.message ?? "invalid request"}`,
+    );
+  }
+
+  return result.data;
 }
 
 function normalizeToolDefinition(definition) {
