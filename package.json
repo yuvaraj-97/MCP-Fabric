@@ -1,5 +1,5 @@
 {
-  "name": "mcp-transport-infra",
+  "name": "mcp-fabric",
   "version": "0.0.0",
   "private": true,
   "description": "Session-aware, transport-agnostic infrastructure for MCP-compatible deployments.",

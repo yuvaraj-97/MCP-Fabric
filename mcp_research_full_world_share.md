@@ -283,7 +283,7 @@ Then, if the design proves useful, prepare a focused upstream proposal or fork.
 ## 11. Suggested Project Structure
 
 ```text
-mcp-transport-infra/
+mcp-fabric/
   README.md
   docs/
     design.md
