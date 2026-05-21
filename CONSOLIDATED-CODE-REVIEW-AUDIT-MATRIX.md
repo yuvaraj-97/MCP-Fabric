@@ -3,7 +3,7 @@
 **Prepared by:** Antigravity Principal Auditing Network  
 **Reference Sources:** @[CLAUDE-Code-Review-Agent-Verification-Report.md] & @[ANTIGRAVITY-Code-Review-Agent-Verification-Report.md]  
 **Repository:** `/home/trader/MCP_Improvement`  
-**Current Status:** Hardening Phase Baseline  
+**Current Status:** Verified bug remediation completed and validated
 
 ---
 
@@ -18,19 +18,19 @@ This consolidated matrix provides a unified, side-by-side comparison of the audi
 
 ## Verified Bugs
 
-| # | Audited Issue / Code Location | Claude Agent Verdict | Antigravity Agent Verdict | Consolidated Consensus & Action Plan | Reviewer Comment |
-|---|-------------------|---------------------|---------------------------|--------------------------------------|------------------|
-| **1** | **Unbounded Request Body Size (DoS)**<br>[gateway-server.js:L611-L618](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L611-L618) | 🔴 **[VERIFIED]**<br>CRITICAL_RISK | 🔴 **[VERIFIED]**<br>CRITICAL | **Blocker.** Implement a strict 1MB byte-limit checker in `readJsonBody()` to prevent heap memory exhaustion and process crashes. | Reproducible defect in the current implementation: request bodies are accumulated without a byte cap. |
-| **2** | **Multi-Byte UTF-8 Stdio Framing Bug**<br>[stdio-transport.js:L130-L153](file:///home/trader/MCP_Improvement/packages/transports/stdio/stdio-transport.js#L130-L153) | 🟡 *Missed / Not reported* | 🔴 **[VERIFIED]**<br>HIGH | **Blocker.** Read and slice buffer accumulation strictly as a binary `Buffer` slice. Do not decode UTF-8 globally into a UTF-16 JS string. | Reproducible defect in the current implementation: UTF-8 byte-length framing is parsed using string indices. |
-| **3** | **Inverted Self-Hijack Security Audit**<br>[gateway-server.js:L839-L897](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L839-L897) | 🟢 **[NO_RISK]**<br>Secure by design | 🔴 **[VERIFIED]**<br>HIGH | **Blocker.** Correct the inverted check. The logic currently crashes the server on public bind regardless of authorization success. | Reproducible defect in the current implementation and consistent with the existing startup-audit tests. |
-| **4** | **Fire-and-Forget Detach Close Rejections**<br>[gateway-server.js:L163](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L163) | 🔴 **[VERIFIED]**<br>HIGH | 🔴 **[VERIFIED]**<br>HIGH | **Blocker.** Remove `void` on `detachEventStream()` inside `request.on("close")` and append `.catch()` to prevent unhandled rejection crashes. | Real error-handling gap: promise rejection from detach is currently dropped. |
-| **5** | **Missing HTTP Server Error Handlers**<br>[gateway-server.js:L50](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L50) | 🟡 **[CONFIRMED]**<br>HIGH | 🔴 **[VERIFIED]**<br>HIGH | **Blocker.** Register `.on('error')` and `.on('clientError')` on the HTTP server object to prevent unhandled socket network crashes. | Real hardening gap: server is created without network-level error handlers. |
-| **6** | **Redis Single-Key Concurrency Race**<br>[redis-session-registry.js:L36-L57](file:///home/trader/MCP_Improvement/packages/gateway/session-registry/redis-session-registry.js#L36-L57) | 🔴 **[VERIFIED]**<br>HIGH | 🔴 **[VERIFIED]**<br>HIGH | **Scale Blocker.** Refactor standard JSON-serialised key into individual session keys (e.g., `mcp:session:${id}`) with native Redis TTL. | Real data-integrity risk under concurrent writers: one JSON blob is read, mutated, and written back. |
-| **7** | **Unbounded SSE Disconnect Map Leak**<br>[gateway-server.js:L752-L757](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L752-L757) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Memory Leak.** Bind disconnect buffer lifetime to session expiration, and enforce a queue ceiling (e.g., max 100 events per session). | Real accumulation path: queued disconnect events can grow until reconnect or explicit cleanup. |
-| **8** | **Response Write Error Handling (SSE)**<br>[gateway-server.js:L667-L668](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L667-L668) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Stability.** Wrap `response.write()` calls inside `try/catch` block to handle backpressure and sudden connection drop write failures gracefully. | Real robustness gap in the current implementation, though not the highest-severity item. |
-| **9** | **No Startup Error Registry Cleanup**<br>[gateway-server.js:L69-L82](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L69-L82) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Stability.** Add `await controller.sessionRegistry.close?.()` inside the startup validation failure `catch` block. | Real cleanup gap: startup failure closes the HTTP server but not the registry resource. |
-| **10** | **Sync File Registry Event Loop Block**<br>[file-session-registry.js:L176-L189](file:///home/trader/MCP_Improvement/packages/gateway/session-registry/file-session-registry.js#L176-L189) | 🔴 **[VERIFIED]**<br>LOW | 🔴 **[VERIFIED]**<br>MEDIUM | **Performance.** Refactor `#persist` write/rename operations to use asynchronous `fs.promises` instead of synchronous functions. | Real implementation limitation, but mainly relevant outside the current local/demo workload assumptions. |
-| **11** | **Non-Atomic Session Assignment**<br>[gateway-server.js:L490-L499](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L490-L499) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **State Sync.** Reserve a lease in the session registry prior to completing application logic processing to prevent mismatch. | Real ordering issue: application work completes before registry persistence is guaranteed. |
+| # | Audited Issue / Code Location | Claude Agent Verdict | Antigravity Agent Verdict | Consolidated Consensus & Action Plan | Reviewer Comment | Completion Status |
+|---|-------------------|---------------------|---------------------------|--------------------------------------|------------------|-------------------|
+| **1** | **Unbounded Request Body Size (DoS)**<br>[gateway-server.js:L611-L618](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L611-L618) | 🔴 **[VERIFIED]**<br>CRITICAL_RISK | 🔴 **[VERIFIED]**<br>CRITICAL | **Completed.** `readJsonBody()` now enforces a 1MB limit and returns 413 for oversized payloads. | Reproducible defect in the current implementation: request bodies were accumulated without a byte cap. | ✅ Completed |
+| **2** | **Multi-Byte UTF-8 Stdio Framing Bug**<br>[stdio-transport.js:L130-L153](file:///home/trader/MCP_Improvement/packages/transports/stdio/stdio-transport.js#L130-L153) | 🟡 *Missed / Not reported* | 🔴 **[VERIFIED]**<br>HIGH | **Completed.** Stdio input now accumulates `Buffer`s, slices by byte length, and decodes only the complete frame body. | Reproducible defect in the current implementation: UTF-8 byte-length framing was parsed using string indices. | ✅ Completed |
+| **3** | **Inverted Self-Hijack Security Audit**<br>[gateway-server.js:L839-L897](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L839-L897) | 🟢 **[NO_RISK]**<br>Secure by design | 🔴 **[VERIFIED]**<br>HIGH | **Completed.** Startup audit now fails only when self-hijack succeeds and accepts only expected 401/403 probe rejection as safe. | Reproducible defect in the current implementation and consistent with the startup-audit tests. | ✅ Completed |
+| **4** | **Fire-and-Forget Detach Close Rejections**<br>[gateway-server.js:L163](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L163) | 🔴 **[VERIFIED]**<br>HIGH | 🔴 **[VERIFIED]**<br>HIGH | **Completed.** Close-triggered stream detach now handles promise rejection. | Real error-handling gap: promise rejection from detach was dropped. | ✅ Completed |
+| **5** | **Missing HTTP Server Error Handlers**<br>[gateway-server.js:L50](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L50) | 🟡 **[CONFIRMED]**<br>HIGH | 🔴 **[VERIFIED]**<br>HIGH | **Completed.** HTTP `error` and `clientError` handlers are registered on server creation. | Real hardening gap: server was created without network-level error handlers. | ✅ Completed |
+| **6** | **Redis Single-Key Concurrency Race**<br>[redis-session-registry.js:L36-L57](file:///home/trader/MCP_Improvement/packages/gateway/session-registry/redis-session-registry.js#L36-L57) | 🔴 **[VERIFIED]**<br>HIGH | 🔴 **[VERIFIED]**<br>HIGH | **Completed.** Redis registry now stores per-session keys with native TTL support and legacy aggregate-key migration. | Real data-integrity risk under concurrent writers: one JSON blob was read, mutated, and written back. | ✅ Completed |
+| **7** | **Unbounded SSE Disconnect Map Leak**<br>[gateway-server.js:L752-L757](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L752-L757) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Completed.** Disconnect queues are capped per session and pruned when sessions expire. | Real accumulation path: queued disconnect events could grow until reconnect or explicit cleanup. | ✅ Completed |
+| **8** | **Response Write Error Handling (SSE)**<br>[gateway-server.js:L667-L668](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L667-L668) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Completed.** SSE writes are guarded and failed streams are removed. | Real robustness gap in the previous implementation, though not the highest-severity item. | ✅ Completed |
+| **9** | **No Startup Error Registry Cleanup**<br>[gateway-server.js:L69-L82](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L69-L82) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Completed.** Startup/listen failure now closes the HTTP server and session registry. | Real cleanup gap: startup failure closed the HTTP server but not the registry resource. | ✅ Completed |
+| **10** | **Sync File Registry Event Loop Block**<br>[file-session-registry.js:L176-L189](file:///home/trader/MCP_Improvement/packages/gateway/session-registry/file-session-registry.js#L176-L189) | 🔴 **[VERIFIED]**<br>LOW | 🔴 **[VERIFIED]**<br>MEDIUM | **Completed.** File registry persistence now uses queued async temp-write plus rename with an explicit `flush()` durability barrier. | Real implementation limitation, mainly relevant outside the current local/demo workload assumptions. | ✅ Completed |
+| **11** | **Non-Atomic Session Assignment**<br>[gateway-server.js:L490-L499](file:///home/trader/MCP_Improvement/packages/transports/http-sse/gateway-server.js#L490-L499) | 🔴 **[VERIFIED]**<br>MEDIUM | 🔴 **[VERIFIED]**<br>MEDIUM | **Completed.** Lifecycle metadata is persisted before application logic runs. | Real ordering issue: application work completed before registry persistence was guaranteed. | ✅ Completed |
 
 ## False Positives, Design Choices, and Overstated Findings
 
@@ -51,7 +51,7 @@ This consolidated matrix provides a unified, side-by-side comparison of the audi
 ### 🔍 Gap 1: Inverted Self-Hijack Security Logic
 * **Claude Verdict:** Marked as secure/safe by design.
 * **Antigravity Finding:** A deep code review and execution audit proved the validation code throws during public bind when security checks pass, and throws when they fail. This halts any public bind configuration.
-* **Remediation Plan:** Fix the conditional logic inside `runStartupSecurityAudit` to correctly validate non-2xx authorization errors for external callers.
+* **Completion:** Fixed. `runStartupSecurityAudit` now fails when the probe succeeds, accepts expected 401/403 unauthorized responses, and rejects unexpected probe failures.
 
 ### 🔍 Gap 2: Silent Request Context Lookup
 * **Claude Verdict:** Missed.
@@ -61,13 +61,19 @@ This consolidated matrix provides a unified, side-by-side comparison of the audi
 ### 🔍 Gap 3: Multi-Byte UTF-8 Stdio Framing
 * **Claude Verdict:** Missed.
 * **Antigravity Finding:** The Stdio adapter writes framing buffers with UTF-8 byte lengths, but reads them by accumulating chunks as JavaScript UTF-16 strings. Emojis and multi-byte text mismatch in byte vs. string index lengths, causing framing to hang or slice incorrectly.
-* **Remediation Plan:** Parse frames in binary buffer format, converting to UTF-8 strings only at the final JSON parsing step.
+* **Completion:** Fixed. Stdio framing now buffers bytes and decodes only after slicing the exact `Content-Length` body.
 
 ---
 
+## Remediation Validation
+
+* **Completed verified bug rows:** 11 / 11
+* **Focused validation:** `node --test tests/failover/http-sse-gateway-controller.test.js tests/failover/http-sse-gateway.test.js tests/failover/http-sse-shared-registry.test.js tests/transport-agnostic/stdio-transport.test.js tests/session-routing/redis-session-registry.test.js tests/session-routing/file-session-registry.test.js`
+* **Full validation:** `npm test` completed with 108 passing tests and 2 expected skips.
+
 ## Consolidation Conclusion
 
-Both networks agree that while the codebase is clean, highly modular, and ideal for local dashboard prototyping, it **cannot be deployed to production without critical remediation**. By aligning on the 6 major **Phase 1 Production Blockers** identified in this consolidated table, we can proceed to safely harden the MCP gateway.
+The verified bug set has been remediated and validated. The remaining rows are tracked as false positives, design choices, or production-hardening considerations rather than open verified bugs.
 
 ---
 *End of Matrix.*

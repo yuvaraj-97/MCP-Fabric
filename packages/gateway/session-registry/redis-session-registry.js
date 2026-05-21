@@ -37,9 +37,8 @@ export class RedisSessionRegistry {
     assertNonEmptyString(sessionId, "sessionId");
     assertNonEmptyString(serverInstanceId, "serverInstanceId");
 
-    const state = await this.#readState();
     const now = this.#now();
-    const existing = state.sessions[sessionId];
+    const existing = await this.#readRecord(sessionId);
     const record = {
       sessionId,
       serverInstanceId,
@@ -51,23 +50,20 @@ export class RedisSessionRegistry {
       },
     };
 
-    state.sessions[sessionId] = record;
-    await this.#writeState(state);
+    await this.#writeRecord(record);
     return cloneRecord(record);
   }
 
   async get(sessionId) {
     assertNonEmptyString(sessionId, "sessionId");
 
-    const state = await this.#readState();
-    const record = state.sessions[sessionId];
+    const record = await this.#readRecord(sessionId);
     if (!record) {
       return undefined;
     }
 
     if (isExpiredRecord(record, this.#now())) {
-      delete state.sessions[sessionId];
-      await this.#writeState(state);
+      await this.#deleteRecord(sessionId);
       return undefined;
     }
 
@@ -77,45 +73,38 @@ export class RedisSessionRegistry {
   async delete(sessionId) {
     assertNonEmptyString(sessionId, "sessionId");
 
-    const state = await this.#readState();
-    const existed = Boolean(state.sessions[sessionId]);
-    delete state.sessions[sessionId];
-    await this.#writeState(state);
+    const existed = (await this.#readRecord(sessionId)) !== undefined;
+    await this.#deleteRecord(sessionId);
     return existed;
   }
 
   async deleteByServer(serverInstanceId) {
     assertNonEmptyString(serverInstanceId, "serverInstanceId");
 
-    const state = await this.#readState();
     let deleted = 0;
-    for (const [sessionId, record] of Object.entries(state.sessions)) {
+    for (const record of await this.#readAllRecords()) {
       if (record.serverInstanceId === serverInstanceId) {
-        delete state.sessions[sessionId];
+        await this.#deleteRecord(record.sessionId);
         deleted += 1;
       }
     }
 
-    await this.#writeState(state);
     return deleted;
   }
 
   async list() {
-    const state = await this.#readState();
     const now = this.#now();
-    let deleted = 0;
-    for (const [sessionId, record] of Object.entries(state.sessions)) {
+    const records = [];
+    for (const record of await this.#readAllRecords()) {
       if (isExpiredRecord(record, now)) {
-        delete state.sessions[sessionId];
-        deleted += 1;
+        await this.#deleteRecord(record.sessionId);
+        continue;
       }
+
+      records.push(record);
     }
 
-    if (deleted > 0) {
-      await this.#writeState(state);
-    }
-
-    return Object.values(state.sessions).map(cloneRecord);
+    return records.map(cloneRecord);
   }
 
   async markDisconnected(sessionId, { gracePeriodMs = 0 } = {}) {
@@ -159,28 +148,27 @@ export class RedisSessionRegistry {
   }
 
   async pruneExpired() {
-    const state = await this.#readState();
     const now = this.#now();
     let deleted = 0;
-    for (const [sessionId, record] of Object.entries(state.sessions)) {
+    for (const record of await this.#readAllRecords()) {
       if (isExpiredRecord(record, now)) {
-        delete state.sessions[sessionId];
+        await this.#deleteRecord(record.sessionId);
         deleted += 1;
       }
-    }
-
-    if (deleted > 0) {
-      await this.#writeState(state);
     }
 
     return deleted;
   }
 
   async clear() {
-    await this.#client.del?.(this.#key);
-    if (typeof this.#client.del !== "function") {
-      await this.#writeState({ version: 1, sessions: {} });
+    const keys = await this.#listSessionKeys();
+    if (keys.length > 0 && typeof this.#client.del === "function") {
+      await this.#client.del(...keys);
+    } else {
+      await Promise.all(keys.map((key) => this.#client.set(key, "")));
     }
+
+    await this.#deleteKey(this.#key);
   }
 
   async close() {
@@ -198,21 +186,136 @@ export class RedisSessionRegistry {
     }
   }
 
-  async #readState() {
-    const raw = await this.#client.get(this.#key);
-    if (!raw) {
-      return {
-        version: 1,
-        sessions: {},
-      };
+  async #readRecord(sessionId) {
+    const key = this.#sessionKey(sessionId);
+    const record = normalizeRecord(JSON.parse((await this.#client.get(key)) || "null"), sessionId);
+    if (record) {
+      return record;
     }
 
-    return normalizeState(JSON.parse(raw));
+    return this.#readLegacyRecord(sessionId);
   }
 
-  async #writeState(state) {
-    await this.#client.set(this.#key, JSON.stringify(normalizeState(state)));
+  async #readRecordByKey(key) {
+    const raw = await this.#client.get(key);
+    if (!raw) {
+      return undefined;
+    }
+
+    return normalizeRecord(JSON.parse(raw));
   }
+
+  async #readAllRecords() {
+    const records = new Map();
+    for (const key of await this.#listSessionKeys()) {
+      const record = await this.#readRecordByKey(key);
+      if (record) {
+        records.set(record.sessionId, record);
+      }
+    }
+
+    for (const record of Object.values(await this.#migrateLegacyState())) {
+      if (!records.has(record.sessionId)) {
+        records.set(record.sessionId, record);
+      }
+    }
+
+    return Array.from(records.values());
+  }
+
+  async #writeRecord(record) {
+    const normalized = normalizeRecord(record);
+    if (!normalized) {
+      return;
+    }
+
+    const ttlMs = ttlFromRecord(normalized, this.#now());
+    if (ttlMs !== undefined && ttlMs <= 0) {
+      await this.#deleteRecord(normalized.sessionId);
+      return;
+    }
+
+    const key = this.#sessionKey(normalized.sessionId);
+    const payload = JSON.stringify(normalized);
+    if (ttlMs !== undefined) {
+      await this.#client.set(key, payload, "PX", ttlMs);
+      return;
+    }
+
+    await this.#client.set(key, payload);
+  }
+
+  async #deleteRecord(sessionId) {
+    await this.#deleteKey(this.#sessionKey(sessionId));
+  }
+
+  async #deleteKey(key) {
+    if (typeof this.#client.del === "function") {
+      await this.#client.del(key);
+      return;
+    }
+
+    await this.#client.set(key, "");
+  }
+
+  async #listSessionKeys() {
+    const pattern = `${this.#key}:session:*`;
+    if (typeof this.#client.scan === "function") {
+      const keys = [];
+      let cursor = "0";
+      do {
+        const [nextCursor, batch] = await this.#client.scan(cursor, "MATCH", pattern, "COUNT", 100);
+        cursor = String(nextCursor);
+        keys.push(...batch);
+      } while (cursor !== "0");
+      return keys;
+    }
+
+    if (typeof this.#client.keys === "function") {
+      return this.#client.keys(pattern);
+    }
+
+    return [];
+  }
+
+  async #readLegacyRecord(sessionId) {
+    const state = await this.#migrateLegacyState();
+    return state[sessionId];
+  }
+
+  async #migrateLegacyState() {
+    const raw = await this.#client.get(this.#key);
+    if (!raw) {
+      return {};
+    }
+
+    const sessions = normalizeState(JSON.parse(raw)).sessions;
+    for (const record of Object.values(sessions)) {
+      await this.#writeRecord(record);
+    }
+    await this.#deleteKey(this.#key);
+    return sessions;
+  }
+
+  #sessionKey(sessionId) {
+    return `${this.#key}:session:${encodeURIComponent(sessionId)}`;
+  }
+}
+
+function normalizeRecord(record, expectedSessionId) {
+  const sessionId = String(expectedSessionId ?? record?.sessionId ?? "");
+  if (!sessionId || !record?.serverInstanceId) {
+    return undefined;
+  }
+
+  return {
+    sessionId,
+    serverInstanceId: String(record.serverInstanceId),
+    createdAt: Number(record.createdAt ?? 0),
+    updatedAt: Number(record.updatedAt ?? 0),
+    metadata:
+      record.metadata && typeof record.metadata === "object" ? { ...record.metadata } : {},
+  };
 }
 
 function normalizeState(state) {
@@ -221,20 +324,10 @@ function normalizeState(state) {
   const sessions = {};
 
   for (const [sessionId, record] of Object.entries(inputSessions)) {
-    if (!sessionId || !record?.serverInstanceId) {
-      continue;
+    const normalized = normalizeRecord(record, sessionId);
+    if (normalized) {
+      sessions[sessionId] = normalized;
     }
-
-    sessions[sessionId] = {
-      sessionId,
-      serverInstanceId: String(record.serverInstanceId),
-      createdAt: Number(record.createdAt ?? 0),
-      updatedAt: Number(record.updatedAt ?? 0),
-      metadata:
-        record.metadata && typeof record.metadata === "object"
-          ? { ...record.metadata }
-          : {},
-    };
   }
 
   return {
@@ -252,6 +345,14 @@ function cloneRecord(record) {
 
 function isExpiredRecord(record, now) {
   return typeof record?.metadata?.expiresAt === "number" && record.metadata.expiresAt <= now;
+}
+
+function ttlFromRecord(record, now) {
+  if (typeof record?.metadata?.expiresAt !== "number") {
+    return undefined;
+  }
+
+  return record.metadata.expiresAt - now;
 }
 
 function isWithinGrace(record, now) {

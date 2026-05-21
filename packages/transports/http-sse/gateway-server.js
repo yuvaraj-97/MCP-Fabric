@@ -7,6 +7,9 @@ import { LoadRouter } from "../../gateway/load-balancer/load-router.js";
 import { createGatewayObserver } from "../../gateway/observability/gateway-observer.js";
 import { createSessionRegistry } from "../../gateway/session-registry/create-session-registry.js";
 
+const MAX_JSON_BODY_BYTES = 1_048_576;
+const MAX_QUEUED_DISCONNECT_EVENTS_PER_SESSION = 100;
+
 export function createHttpSseGatewayServer({
   serverInstances = [
     { serverInstanceId: "server-a", load: 0.2, healthy: true, acceptingNewSessions: true },
@@ -48,6 +51,17 @@ export function createHttpSseGatewayServer({
     now,
   });
   const server = createServer(createGatewayHttpHandler({ controller }));
+  server.on("error", (error) => {
+    auditLogger.error?.("[HTTP/SSE gateway] HTTP server error", error);
+  });
+  server.on("clientError", (error, socket) => {
+    auditLogger.error?.("[HTTP/SSE gateway] HTTP client error", error);
+    if (!socket?.writable) {
+      return;
+    }
+
+    socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+  });
 
   return {
     server,
@@ -60,13 +74,22 @@ export function createHttpSseGatewayServer({
         portOrOptions,
         maybeHost,
       });
-      const address = await new Promise((resolve) => {
-        server.listen(listenOptions.port, listenOptions.host, () => {
-          resolve(server.address());
-        });
-      });
-
       try {
+        const address = await new Promise((resolve, reject) => {
+          const onError = (error) => {
+            server.off("listening", onListening);
+            reject(error);
+          };
+          const onListening = () => {
+            server.off("error", onError);
+            resolve(server.address());
+          };
+          server.once("error", onError);
+          server.listen(listenOptions.port, listenOptions.host, () => {
+            onListening();
+          });
+        });
+
         await runStartupSecurityAudit({
           address,
           allowPublicBind: listenOptions.allowPublicBind,
@@ -77,7 +100,8 @@ export function createHttpSseGatewayServer({
           port: address.port,
         });
       } catch (error) {
-        await new Promise((resolve) => server.close(() => resolve()));
+        await closeHttpServer(server);
+        await controller.sessionRegistry.close?.();
         throw error;
       }
 
@@ -160,7 +184,7 @@ export function createGatewayHttpHandler({
         }
 
         request.on?.("close", () => {
-          void controller.detachEventStream(sessionId, response);
+          controller.detachEventStream(sessionId, response).catch(() => {});
         });
 
         return;
@@ -311,6 +335,7 @@ export function createHttpSseGatewayController({
     async attachEventStream(sessionId, response) {
       const record = await resolvedSessionRegistry.get(sessionId);
       if (!record) {
+        queuedDisconnectEvents.delete(sessionId);
         addEventStream(eventStreams, sessionId, response);
         observer.record("stream.attached", {
           sessionId,
@@ -323,6 +348,7 @@ export function createHttpSseGatewayController({
       const reconnectState = deriveReconnectState(record, now());
       if (reconnectState === "grace-expired") {
         await resolvedSessionRegistry.delete(sessionId);
+        queuedDisconnectEvents.delete(sessionId);
         throw createGatewaySessionError({
           sessionId,
           code: "reconnect-grace-expired",
@@ -379,6 +405,10 @@ export function createHttpSseGatewayController({
     },
     async handleGatewayMessage(body) {
       await resolvedSessionRegistry.pruneExpired?.();
+      await pruneQueuedDisconnectEvents({
+        queuedDisconnectEvents,
+        sessionRegistry: resolvedSessionRegistry,
+      });
       const method = body.method;
       const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
       const existingSessionRecord = sessionId
@@ -408,6 +438,7 @@ export function createHttpSseGatewayController({
       const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
       if (method !== "initialize" && reconnectState === "grace-expired") {
         await resolvedSessionRegistry.delete(sessionId);
+        queuedDisconnectEvents.delete(sessionId);
         observer.record("request.rejected", {
           method,
           sessionId,
@@ -422,6 +453,17 @@ export function createHttpSseGatewayController({
       }
 
       const route = await router.routeSession(sessionId);
+      const lifecycleMetadata = buildLifecycleMetadata({
+        existingRecord: existingSessionRecord,
+        clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
+        now: requestNow,
+        sessionTtlMs: effectiveSessionTtlMs,
+      });
+      await resolvedSessionRegistry.assign(
+        sessionId,
+        route.serverInstanceId,
+        lifecycleMetadata,
+      );
       const application = applications.get(route.serverInstanceId);
       let recoveryAction = determineRecoveryAction({
         method,
@@ -487,16 +529,6 @@ export function createHttpSseGatewayController({
         }),
       );
       const result = assertGatewayResult(envelope);
-      await resolvedSessionRegistry.assign(
-        sessionId,
-        route.serverInstanceId,
-        buildLifecycleMetadata({
-          existingRecord: existingSessionRecord,
-          clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
-          now: requestNow,
-          sessionTtlMs: effectiveSessionTtlMs,
-        }),
-      );
 
       publishEvent(eventStreams, sessionId, "route.selected", {
         sessionId,
@@ -610,8 +642,19 @@ function assertGatewayResult(envelope) {
 
 async function readJsonBody(request) {
   const chunks = [];
+  let byteLength = 0;
   for await (const chunk of request) {
-    chunks.push(chunk);
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteLength += buffer.byteLength;
+    if (byteLength > MAX_JSON_BODY_BYTES) {
+      throw createHttpError({
+        statusCode: 413,
+        code: "request-body-too-large",
+        message: "Request body exceeds the 1MB limit.",
+      });
+    }
+
+    chunks.push(buffer);
   }
 
   const raw = Buffer.concat(chunks).toString("utf8");
@@ -624,6 +667,19 @@ function sendJson(response, statusCode, payload) {
     "Access-Control-Allow-Origin": "*",
   });
   response.end(JSON.stringify(payload));
+}
+
+function closeHttpServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (!error || error.code === "ERR_SERVER_NOT_RUNNING") {
+        resolve();
+        return;
+      }
+
+      reject(error);
+    });
+  });
 }
 
 function addEventStream(eventStreams, sessionId, response) {
@@ -659,13 +715,25 @@ function publishEvent(eventStreams, sessionId, event, payload) {
   }
 
   for (const response of clients) {
-    writeSse(response, event, payload);
+    if (!writeSse(response, event, payload)) {
+      clients.delete(response);
+    }
+  }
+
+  if (clients.size === 0) {
+    eventStreams.delete(sessionId);
   }
 }
 
 function writeSse(response, event, payload) {
-  response.write(`event: ${event}\n`);
-  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+  try {
+    response.write(`event: ${event}\n`);
+    response.write(`data: ${JSON.stringify(payload)}\n\n`);
+    return true;
+  } catch {
+    response.destroy?.();
+    return false;
+  }
 }
 
 function deriveReconnectState(existingSessionRecord, requestNow) {
@@ -754,6 +822,9 @@ function queueDisconnectEvent({
     event,
     payload,
   });
+  while (queued.length > MAX_QUEUED_DISCONNECT_EVENTS_PER_SESSION) {
+    queued.shift();
+  }
   queuedDisconnectEvents.set(sessionId, queued);
   observer.record("disconnect.queue.buffered", {
     sessionId,
@@ -784,6 +855,25 @@ function takeQueuedDisconnectEvents({
     event: queuedEvent.event,
     payload: { ...queuedEvent.payload },
   }));
+}
+
+async function pruneQueuedDisconnectEvents({ queuedDisconnectEvents, sessionRegistry }) {
+  if (queuedDisconnectEvents.size === 0 || typeof sessionRegistry?.get !== "function") {
+    return;
+  }
+
+  for (const sessionId of queuedDisconnectEvents.keys()) {
+    if (!(await sessionRegistry.get(sessionId))) {
+      queuedDisconnectEvents.delete(sessionId);
+    }
+  }
+}
+
+function createHttpError({ statusCode, code, message }) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
 }
 
 function createGatewaySessionError({ sessionId, code, statusCode, message }) {
@@ -867,14 +957,16 @@ export async function runStartupSecurityAudit({
     return;
   }
 
-  await runSelfHijackProbe({
+  const selfHijackSucceeded = await runSelfHijackProbe({
     fetchImpl,
     baseUrl: `http://127.0.0.1:${effectivePort}`,
   });
 
-  throw new Error(
-    "FATAL: Gateway is publicly accessible and vulnerable to hijacking. Shutting down.",
-  );
+  if (selfHijackSucceeded) {
+    throw new Error(
+      "FATAL: Gateway is publicly accessible and vulnerable to hijacking. Shutting down.",
+    );
+  }
 }
 
 async function runSelfHijackProbe({ fetchImpl, baseUrl }) {
@@ -891,6 +983,10 @@ async function runSelfHijackProbe({ fetchImpl, baseUrl }) {
 
   if (response.ok) {
     return true;
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return false;
   }
 
   throw new Error("Startup self-hijack probe did not receive an unauthorized failure");

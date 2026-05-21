@@ -276,6 +276,92 @@ test("gateway controller records cancel policy without queueing reconnect output
   );
 });
 
+test("gateway controller drops queued disconnect events when their session expires", async () => {
+  const clock = createClock();
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    operatorConfig: {
+      onDisconnect: "queue",
+      sessionTtlMs: 100,
+    },
+    now: clock.now,
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-expiring-queue",
+    params: { clientId: "queue-expiry-test" },
+  });
+  const collector = createEventCollector();
+  await controller.attachEventStream(initialized.sessionId, collector);
+  await controller.detachEventStream(initialized.sessionId, collector);
+  assert.equal(controller.listQueuedDisconnectEvents(initialized.sessionId).length, 1);
+
+  clock.advance(101);
+  await assert.rejects(
+    () =>
+      controller.handleGatewayMessage({
+        method: "echo",
+        sessionId: initialized.sessionId,
+        params: { message: "expired" },
+      }),
+    /Session was not found or has expired/,
+  );
+  assert.equal(controller.listQueuedDisconnectEvents(initialized.sessionId).length, 0);
+});
+
+test("gateway controller caps queued disconnect events per session", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    operatorConfig: {
+      onDisconnect: "queue",
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-capped-queue",
+    params: { clientId: "queue-cap-test" },
+  });
+  for (let index = 0; index < 105; index += 1) {
+    await controller.detachEventStream(initialized.sessionId, createEventCollector());
+  }
+
+  assert.equal(controller.listQueuedDisconnectEvents(initialized.sessionId).length, 100);
+});
+
+test("gateway controller persists lifecycle metadata before invoking application logic", async () => {
+  let registry;
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    createApplication({ serverInstanceId }) {
+      return {
+        getSessionState() {
+          return true;
+        },
+        async handleMessage(message) {
+          const record = await registry.get(message.sessionId);
+          assert.equal(record.serverInstanceId, serverInstanceId);
+          assert.equal(record.metadata.clientId, "atomic-assignment-test");
+          assert.equal(record.metadata.connectionState, "active");
+          return {
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { ok: true },
+          };
+        },
+      };
+    },
+  });
+  registry = controller.sessionRegistry;
+
+  await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "atomic-session",
+    params: { clientId: "atomic-assignment-test" },
+  });
+});
+
 test("gateway controller records observability events and counters", async () => {
   const controller = createHttpSseGatewayController({
     serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
@@ -365,6 +451,42 @@ test("startup security audit fails when the self-hijack probe succeeds", async (
         },
       }),
     /FATAL: Gateway is publicly accessible and vulnerable to hijacking/,
+  );
+});
+
+test("startup security audit allows public bind when the self-hijack probe is unauthorized", async () => {
+  await runStartupSecurityAudit({
+    host: "0.0.0.0",
+    port: 3000,
+    allowPublicBind: true,
+    enforceStartupSecurityAudit: true,
+    fetchImpl: async () => ({
+      ok: false,
+      status: 401,
+    }),
+    auditLogger: {
+      error() {},
+    },
+  });
+});
+
+test("startup security audit rejects unexpected self-hijack probe failures", async () => {
+  await assert.rejects(
+    () =>
+      runStartupSecurityAudit({
+        host: "0.0.0.0",
+        port: 3000,
+        allowPublicBind: true,
+        enforceStartupSecurityAudit: true,
+        fetchImpl: async () => ({
+          ok: false,
+          status: 500,
+        }),
+        auditLogger: {
+          error() {},
+        },
+      }),
+    /Startup self-hijack probe did not receive an unauthorized failure/,
   );
 });
 

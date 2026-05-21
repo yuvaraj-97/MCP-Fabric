@@ -76,6 +76,79 @@ test("stdio adapter streams Content-Length framed responses when started", async
   assert.equal(parsed.result.session.transport, "stdio");
 });
 
+test("stdio adapter parses multi-byte UTF-8 payloads using Content-Length bytes", async () => {
+  const server = createEchoServer();
+  const input = new PassThrough();
+  const output = createStringCollector();
+  const transport = new StdioTransportAdapter({
+    server,
+    input,
+    output,
+  }).start();
+
+  const firstPayload = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 31,
+    method: "echo",
+    params: {
+      message: "hello 🌍 नमस्ते",
+    },
+  });
+  const secondPayload = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 32,
+    method: "echo",
+    params: {
+      message: "boundary-ok",
+    },
+  });
+
+  input.write(createFrame(firstPayload));
+  input.write(createFrame(secondPayload));
+
+  await waitFor(() => readFramedMessages(output.value).length === 2);
+
+  transport.stop();
+
+  const [first, second] = readFramedMessages(output.value);
+  assert.equal(first.result.message, "hello 🌍 नमस्ते");
+  assert.equal(second.result.message, "boundary-ok");
+});
+
+test("stdio adapter waits for complete frame when chunk splits inside multi-byte characters", async () => {
+  const server = createEchoServer();
+  const input = new PassThrough();
+  const output = createStringCollector();
+  const transport = new StdioTransportAdapter({
+    server,
+    input,
+    output,
+  }).start();
+
+  const payload = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 41,
+    method: "echo",
+    params: {
+      message: "split 🔧 frame",
+    },
+  });
+  const frame = Buffer.from(createFrame(payload), "utf8");
+  const splitAt = frame.indexOf(Buffer.from("🔧", "utf8")) + 1;
+
+  input.write(frame.subarray(0, splitAt));
+  assert.equal(output.value, "");
+
+  input.write(frame.subarray(splitAt));
+
+  await waitFor(() => output.value.includes("Content-Length:"));
+
+  transport.stop();
+
+  const [parsed] = readFramedMessages(output.value);
+  assert.equal(parsed.result.message, "split 🔧 frame");
+});
+
 function createStringCollector() {
   const collector = new Writable({
     write(chunk, encoding, callback) {
@@ -85,6 +158,24 @@ function createStringCollector() {
   });
   collector.value = "";
   return collector;
+}
+
+function createEchoServer() {
+  return {
+    async handleMessage(message) {
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          message: message.params?.message,
+        },
+      };
+    },
+  };
+}
+
+function createFrame(payload) {
+  return `Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`;
 }
 
 async function waitFor(predicate, timeoutMs = 200) {
@@ -99,8 +190,34 @@ async function waitFor(predicate, timeoutMs = 200) {
 }
 
 function readFramedMessage(raw) {
-  const separatorIndex = raw.indexOf("\r\n\r\n");
-  assert.notEqual(separatorIndex, -1);
-  const payload = raw.slice(separatorIndex + 4);
-  return JSON.parse(payload);
+  return readFramedMessages(raw)[0];
+}
+
+function readFramedMessages(raw) {
+  const messages = [];
+  let remaining = raw;
+
+  while (remaining.length > 0) {
+    const separatorIndex = remaining.indexOf("\r\n\r\n");
+    if (separatorIndex === -1) {
+      break;
+    }
+
+    const headerBlock = remaining.slice(0, separatorIndex);
+    const contentLengthMatch = headerBlock.match(/Content-Length:\s*(\d+)/i);
+    assert.ok(contentLengthMatch);
+
+    const bodyStart = separatorIndex + 4;
+    const bodyBuffer = Buffer.from(remaining.slice(bodyStart), "utf8");
+    const contentLength = Number(contentLengthMatch[1]);
+    if (bodyBuffer.length < contentLength) {
+      break;
+    }
+
+    const payload = bodyBuffer.subarray(0, contentLength).toString("utf8");
+    messages.push(JSON.parse(payload));
+    remaining = bodyBuffer.subarray(contentLength).toString("utf8");
+  }
+
+  return messages;
 }

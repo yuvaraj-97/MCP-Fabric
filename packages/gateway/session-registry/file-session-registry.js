@@ -1,17 +1,22 @@
 import { dirname } from "node:path";
 import {
   existsSync,
-  mkdirSync,
+  promises as fs,
   readFileSync,
-  renameSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
+
+const processLocalStates = new Map();
 
 export class FileSessionRegistry {
   #filePath;
   #now;
   #sessions = new Map();
+  #writePromise = Promise.resolve();
+  #writeScheduled = false;
+  #writeQueued = false;
+  #writeSequence = 0;
+  #persistError;
 
   constructor({ filePath, now = () => Date.now() } = {}) {
     assertNonEmptyString(filePath, "filePath");
@@ -147,7 +152,21 @@ export class FileSessionRegistry {
     this.#persist();
   }
 
+  async flush() {
+    await this.#writePromise;
+    if (this.#persistError) {
+      throw this.#persistError;
+    }
+  }
+
   #loadFromDisk() {
+    const processLocalState = processLocalStates.get(this.#filePath);
+    if (processLocalState) {
+      this.#loadState(processLocalState);
+      this.pruneExpired();
+      return;
+    }
+
     if (!existsSync(this.#filePath)) {
       return;
     }
@@ -157,8 +176,12 @@ export class FileSessionRegistry {
       return;
     }
 
-    const parsed = JSON.parse(raw);
-    for (const record of parsed.sessions ?? []) {
+    this.#loadState(JSON.parse(raw));
+    this.pruneExpired();
+  }
+
+  #loadState(state) {
+    for (const record of state.sessions ?? []) {
       if (record?.sessionId && record?.serverInstanceId) {
         this.#sessions.set(record.sessionId, {
           sessionId: record.sessionId,
@@ -169,27 +192,68 @@ export class FileSessionRegistry {
         });
       }
     }
-
-    this.pruneExpired();
   }
 
   #persist() {
-    mkdirSync(dirname(this.#filePath), { recursive: true });
-    const tmpPath = `${this.#filePath}.tmp`;
-    const payload = JSON.stringify(
-      {
-        version: 1,
-        sessions: this.list(),
-      },
-      null,
-      2,
-    );
-    writeFileSync(tmpPath, payload, "utf8");
-    renameSync(tmpPath, this.#filePath);
+    processLocalStates.set(this.#filePath, this.#snapshot());
+
+    if (this.#writeScheduled) {
+      this.#writeQueued = true;
+      return;
+    }
+
+    this.#writeScheduled = true;
+    this.#writePromise = this.#writePromise
+      .catch(() => undefined)
+      .then(() => this.#drainPersistQueue());
+    this.#writePromise.catch(() => undefined);
+  }
+
+  #snapshot() {
+    return {
+      version: 1,
+      sessions: Array.from(this.#sessions.values(), cloneRecord),
+    };
+  }
+
+  async #drainPersistQueue() {
+    let writtenState;
+    try {
+      do {
+        this.#writeQueued = false;
+        const state = processLocalStates.get(this.#filePath) ?? this.#snapshot();
+        writtenState = state;
+        await this.#writeState(state);
+      } while (this.#writeQueued);
+
+      if (processLocalStates.get(this.#filePath) === writtenState) {
+        processLocalStates.delete(this.#filePath);
+      }
+    } finally {
+      this.#writeScheduled = false;
+    }
+  }
+
+  async #writeState(state) {
+    const tmpPath = `${this.#filePath}.${process.pid}.${++this.#writeSequence}.tmp`;
+    const payload = JSON.stringify(state, null, 2);
+
+    try {
+      await fs.mkdir(dirname(this.#filePath), { recursive: true });
+      await fs.writeFile(tmpPath, payload, "utf8");
+      await fs.rename(tmpPath, this.#filePath);
+      this.#persistError = undefined;
+    } catch (error) {
+      this.#persistError = error;
+      throw error;
+    } finally {
+      await fs.rm(tmpPath, { force: true }).catch(() => undefined);
+    }
   }
 }
 
 export function removeRegistryFile(filePath) {
+  processLocalStates.delete(filePath);
   if (existsSync(filePath)) {
     rmSync(filePath, { force: true });
   }

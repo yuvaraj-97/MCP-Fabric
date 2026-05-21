@@ -59,19 +59,144 @@ test("redis session registry preserves disconnect grace metadata across instance
   assert.equal(await second.isWithinGrace("session-grace"), true);
 });
 
-function createFakeRedisClient() {
+test("redis session registry writes independent session keys to avoid concurrent lost updates", async () => {
+  const client = createFakeRedisClient({
+    beforeGet: createBarrier({ count: 2 }),
+  });
+  const registry = new RedisSessionRegistry({ client, key: "sessions:test" });
+
+  await Promise.all([
+    registry.assign("session-1", "server-a"),
+    registry.assign("session-2", "server-b"),
+  ]);
+
+  assert.equal((await registry.get("session-1")).serverInstanceId, "server-a");
+  assert.equal((await registry.get("session-2")).serverInstanceId, "server-b");
+  assert.deepEqual(client.keysWritten().sort(), [
+    "sessions:test:session:session-1",
+    "sessions:test:session:session-2",
+  ]);
+});
+
+test("redis session registry uses native redis ttl when expiresAt metadata exists", async () => {
+  const clock = createClock();
+  const client = createFakeRedisClient({ now: clock.now });
+  const registry = new RedisSessionRegistry({
+    client,
+    key: "sessions:test",
+    now: clock.now,
+  });
+
+  await registry.assign("session-ttl", "server-a", { expiresAt: clock.now() + 100 });
+
+  assert.deepEqual(client.setCalls[0], {
+    key: "sessions:test:session:session-ttl",
+    mode: "PX",
+    ttlMs: 100,
+  });
+  assert.equal((await registry.get("session-ttl")).serverInstanceId, "server-a");
+
+  clock.advance(101);
+
+  assert.equal(await registry.get("session-ttl"), undefined);
+  assert.equal((await registry.list()).length, 0);
+});
+
+test("redis session registry can read and migrate legacy aggregate state", async () => {
+  const client = createFakeRedisClient();
+  await client.set(
+    "sessions:test",
+    JSON.stringify({
+      version: 1,
+      sessions: {
+        "legacy-session": {
+          sessionId: "legacy-session",
+          serverInstanceId: "server-a",
+          createdAt: 1,
+          updatedAt: 1,
+          metadata: { clientId: "legacy-client" },
+        },
+      },
+    }),
+  );
+  const registry = new RedisSessionRegistry({ client, key: "sessions:test" });
+
+  const record = await registry.get("legacy-session");
+
+  assert.equal(record.serverInstanceId, "server-a");
+  assert.equal(record.metadata.clientId, "legacy-client");
+  assert.deepEqual(client.keysWritten(), ["sessions:test:session:legacy-session"]);
+});
+
+function createFakeRedisClient({ now = () => Date.now(), beforeGet } = {}) {
   const store = new Map();
-  return {
+  const expiresAt = new Map();
+  const client = {
+    setCalls: [],
+    keysWritten() {
+      return Array.from(store.keys());
+    },
     async get(key) {
+      await beforeGet?.(key);
+      expireKey(key);
       return store.get(key) ?? null;
     },
-    async set(key, value) {
+    async set(key, value, mode, ttlMs) {
       store.set(key, value);
+      if (mode === "PX") {
+        expiresAt.set(key, now() + ttlMs);
+        client.setCalls.push({ key, mode, ttlMs });
+      } else {
+        expiresAt.delete(key);
+        client.setCalls.push({ key });
+      }
       return "OK";
     },
-    async del(key) {
-      return store.delete(key) ? 1 : 0;
+    async del(...keys) {
+      let deleted = 0;
+      for (const key of keys) {
+        expireKey(key);
+        if (store.delete(key)) {
+          deleted += 1;
+        }
+        expiresAt.delete(key);
+      }
+      return deleted;
     },
+    async keys(pattern) {
+      const prefix = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
+      for (const key of store.keys()) {
+        expireKey(key);
+      }
+      return Array.from(store.keys()).filter((key) => key.startsWith(prefix));
+    },
+  };
+
+  return client;
+
+  function expireKey(key) {
+    const expiry = expiresAt.get(key);
+    if (expiry !== undefined && expiry <= now()) {
+      store.delete(key);
+      expiresAt.delete(key);
+    }
+  }
+}
+
+function createBarrier({ count }) {
+  let pending = 0;
+  let release;
+  const ready = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  return async function waitForConcurrentGets() {
+    pending += 1;
+    if (pending >= count) {
+      release();
+    }
+
+    await ready;
   };
 }
 

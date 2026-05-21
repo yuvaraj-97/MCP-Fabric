@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createGatewayHttpHandler,
   createHttpSseGatewayController,
+  createHttpSseGatewayServer,
 } from "../../packages/transports/http-sse/gateway-server.js";
 import {
   invokeHttpHandler,
@@ -203,6 +204,110 @@ test("HTTP/SSE gateway exposes operator observability over HTTP", async () => {
   const payload = parseJsonBody(response);
   assert.ok(payload.summary.totalRequests >= 1);
   assert.ok(payload.recentEvents.some((event) => event.eventType === "request.received"));
+});
+
+test("HTTP/SSE gateway rejects request bodies above 1MB", async () => {
+  const controller = createHttpSseGatewayController();
+  const handler = createGatewayHttpHandler({ controller });
+
+  const response = await invokeHttpHandler(handler, {
+    method: "POST",
+    url: "/message",
+    headers: { host: "127.0.0.1:3000" },
+    body: `{"method":"initialize","params":{"payload":"${"x".repeat(1_048_576)}"}}`,
+  });
+
+  assert.equal(response.statusCode, 413);
+  const payload = parseJsonBody(response);
+  assert.equal(payload.code, "request-body-too-large");
+});
+
+test("HTTP/SSE gateway tolerates SSE write failures and drops the failed stream", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "write-failure-session",
+    params: { clientId: "write-failure-test" },
+  });
+  const brokenStream = {
+    writes: 0,
+    destroyed: false,
+    write() {
+      this.writes += 1;
+      if (this.writes > 1) {
+        throw new Error("socket closed");
+      }
+    },
+    destroy() {
+      this.destroyed = true;
+    },
+  };
+
+  await controller.attachEventStream(initialized.sessionId, brokenStream);
+  await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: { message: "publish through broken stream" },
+  });
+
+  assert.equal(brokenStream.destroyed, true);
+  assert.equal(controller.listPublishedEvents(initialized.sessionId).length, 0);
+});
+
+test("HTTP/SSE gateway installs HTTP server error handlers", () => {
+  const logs = [];
+  const gateway = createHttpSseGatewayServer({
+    auditLogger: {
+      error(...args) {
+        logs.push(args);
+      },
+    },
+  });
+  const socketWrites = [];
+  const socket = {
+    writable: true,
+    end(chunk) {
+      socketWrites.push(chunk);
+    },
+  };
+
+  assert.doesNotThrow(() => gateway.server.emit("error", new Error("listen failed")));
+  assert.doesNotThrow(() => gateway.server.emit("clientError", new Error("bad request"), socket));
+  assert.equal(logs.length, 2);
+  assert.match(socketWrites[0], /400 Bad Request/);
+});
+
+test("HTTP/SSE gateway closes the session registry when startup audit fails", async () => {
+  let closed = false;
+  const gateway = createHttpSseGatewayServer({
+    sessionRegistry: {
+      assign() {},
+      get() {},
+      list() {
+        return [];
+      },
+      close() {
+        closed = true;
+      },
+    },
+    fetchImpl: async () => ({ ok: true }),
+    auditLogger: {
+      error() {},
+    },
+  });
+
+  await assert.rejects(() =>
+    gateway.listen({
+      port: 0,
+      host: "0.0.0.0",
+      allowPublicBind: true,
+      enforceStartupSecurityAudit: true,
+    }),
+  );
+  assert.equal(closed, true);
 });
 
 async function sendHttpMessage(handler, body) {

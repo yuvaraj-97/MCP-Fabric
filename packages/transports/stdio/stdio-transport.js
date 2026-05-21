@@ -6,7 +6,7 @@ export class StdioTransportAdapter {
   #output;
   #error;
   #contextFactory;
-  #buffer = "";
+  #buffer = Buffer.alloc(0);
   #started = false;
 
   constructor({
@@ -36,9 +36,9 @@ export class StdioTransportAdapter {
     }
 
     this.#started = true;
-    this.#input.setEncoding?.("utf8");
     this.#input.on("data", async (chunk) => {
-      this.#buffer += chunk.toString();
+      const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      this.#buffer = Buffer.concat([this.#buffer, chunkBuffer]);
       await this.#drainBuffer();
     });
 
@@ -133,7 +133,7 @@ function readFrameFromBuffer(buffer) {
     return null;
   }
 
-  const headerBlock = buffer.slice(0, separatorIndex);
+  const headerBlock = buffer.subarray(0, separatorIndex).toString("ascii");
   const contentLengthMatch = headerBlock.match(/Content-Length:\s*(\d+)/i);
   if (!contentLengthMatch) {
     throw new Error("Missing Content-Length header");
@@ -147,8 +147,8 @@ function readFrameFromBuffer(buffer) {
   }
 
   return {
-    body: buffer.slice(bodyStart, bodyEnd),
-    remaining: buffer.slice(bodyEnd),
+    body: buffer.subarray(bodyStart, bodyEnd).toString("utf8"),
+    remaining: buffer.subarray(bodyEnd),
   };
 }
 
