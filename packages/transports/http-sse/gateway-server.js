@@ -74,8 +74,9 @@ export function createHttpSseGatewayServer({
         portOrOptions,
         maybeHost,
       });
+      let address;
       try {
-        const address = await new Promise((resolve, reject) => {
+        address = await new Promise((resolve, reject) => {
           const onError = (error) => {
             server.off("listening", onListening);
             reject(error);
