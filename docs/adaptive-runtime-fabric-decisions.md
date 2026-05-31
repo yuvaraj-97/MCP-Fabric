@@ -75,6 +75,10 @@ immediately.
    - Phase 4: self-optimization only after production-like telemetry validates
      the recommendation quality.
 
+   Phase 2 is implemented as diagnostics only: recommendations are returned in
+   gateway responses and recorded in observability, but they do not alter
+   routing behavior.
+
 9. **Classifier signal sources**
 
    Early classification signals should come from explicit metadata and

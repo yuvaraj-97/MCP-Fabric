@@ -12,6 +12,9 @@ Initial policy:
   - `stateless` bypasses existing affinity and selects a healthy instance for
     each request
 
+The router does not consume classifier recommendations. Phase 2 recommendations
+are diagnostics only and explicit runtime mode remains the routing input.
+
 Prototype implementation:
 
 - [`load-router.js`](load-router.js)

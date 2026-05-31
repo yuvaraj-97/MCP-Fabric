@@ -115,6 +115,8 @@ The implemented slices today are:
   basic operator observability
 - explicit Phase 1 runtime modes for gateway routing: `sticky` by default and
   opt-in `stateless` request/session metadata
+- Phase 2 recommendation-only runtime classifier diagnostics with structured
+  reasons, scores, and observability events
 - self-explaining local dashboard for routing behavior
 - automated tests for core dispatch, `stdio` transport behavior, stickiness,
   HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
@@ -216,6 +218,29 @@ Runtime mode can be selected explicitly on gateway messages:
 
 If no mode is provided, the gateway uses `sticky`. Follow-up requests inherit the
 stored session mode unless an explicit override is provided.
+
+Runtime classification is currently diagnostic only. Requests may include
+`runtimeHints` or `params.runtimeHints` to receive a recommendation without
+changing routing behavior:
+
+```json
+{
+  "method": "echo",
+  "sessionId": "session-123",
+  "params": {
+    "message": "read-only lookup",
+    "runtimeHints": {
+      "replaySafe": true,
+      "readOnly": true,
+      "externalState": true
+    }
+  }
+}
+```
+
+The response includes `runtimeRecommendation`, and `/observability` records
+`runtime.recommendation` events. Explicit `runtimeMode` still wins over any
+recommendation.
 
 ## Install
 

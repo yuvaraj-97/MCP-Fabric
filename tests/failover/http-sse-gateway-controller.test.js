@@ -134,6 +134,126 @@ test("gateway controller rejects unsupported runtime modes", async () => {
   );
 });
 
+test("gateway controller returns recommendation-only classifier diagnostics", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-recommendation",
+    params: {
+      clientId: "recommendation-test",
+      runtimeMode: "sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.equal(initialized.runtimeRecommendation.phase, "recommendation-only");
+  assert.equal(initialized.runtimeRecommendation.automaticPlacement, false);
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.explicitOverride, true);
+  assert.equal(initialized.serverInstanceId, "server-a");
+
+  const echoed = await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: {
+      message: "still sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(echoed.serverInstanceId, "server-a");
+  assert.equal(echoed.reusedExistingSession, true);
+  assert.equal(echoed.runtimeMode, "sticky");
+  assert.equal(echoed.runtimeRecommendation.recommendedMode, "stateless");
+
+  const observability = controller.describeObservability();
+  assert.ok(observability.summary.totalRuntimeRecommendations >= 2);
+  assert.ok(observability.summary.totalRuntimeOverrideWarnings >= 1);
+  assert.ok(
+    observability.recentEvents.some(
+      (event) =>
+        event.eventType === "runtime.recommendation" &&
+        event.runtimeRecommendation.recommendedMode === "stateless",
+    ),
+  );
+});
+
+test("gateway controller treats malformed runtime hints as diagnostics only", async () => {
+  const controller = createHttpSseGatewayController();
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-invalid-hints",
+    params: {
+      clientId: "invalid-hints-test",
+      runtimeHints: {
+        resourceHandles: ["browser", 42],
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.deepEqual(initialized.runtimeRecommendation.signals.invalidHints, ["resourceHandles"]);
+  assert.ok(
+    initialized.runtimeRecommendation.reasons.some(
+      (reason) => reason.code === "invalid-runtime-hints-ignored",
+    ),
+  );
+  assert.ok(
+    controller
+      .listAuditEvents()
+      .some(
+        (event) =>
+          event.eventType === "runtime.recommendation" &&
+          event.runtimeRecommendation.signals.invalidHints.includes("resourceHandles"),
+      ),
+  );
+});
+
+test("gateway controller preserves routing when classifier diagnostics fail", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+  const params = {
+    clientId: "classifier-failure-test",
+  };
+  Object.defineProperty(params, "runtimeHints", {
+    get() {
+      throw new Error("runtime hints unavailable");
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-classifier-failure",
+    params,
+  });
+
+  assert.equal(initialized.serverInstanceId, "server-a");
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "sticky");
+  assert.ok(
+    initialized.runtimeRecommendation.reasons.some(
+      (reason) => reason.code === "classifier-error-ignored",
+    ),
+  );
+});
+
 test("gateway controller reconnects after restart when using a durable registry", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mcp-runtime-"));
   const filePath = join(dir, "sessions.json");

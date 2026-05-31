@@ -170,6 +170,93 @@ test("HTTP/SSE gateway rejects unsupported runtime modes with a client error", a
   assert.equal(payload.code, "invalid-runtime-mode");
 });
 
+test("HTTP/SSE gateway exposes recommendation-only classifier diagnostics", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+  const handler = createGatewayHttpHandler({ controller });
+
+  const initialized = await sendHttpMessage(handler, {
+    method: "initialize",
+    sessionId: "http-recommendation",
+    params: {
+      clientId: "http-recommendation-test",
+      runtimeMode: "sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.automaticPlacement, false);
+
+  const echoed = await sendHttpMessage(handler, {
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: {
+      message: "recommend only",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(echoed.serverInstanceId, initialized.serverInstanceId);
+  assert.equal(echoed.reusedExistingSession, true);
+  assert.equal(echoed.runtimeRecommendation.recommendedMode, "stateless");
+
+  const observability = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: "/observability",
+    headers: { host: "127.0.0.1:3000" },
+  });
+  const payload = parseJsonBody(observability);
+  assert.ok(payload.summary.totalRuntimeRecommendations >= 2);
+  assert.ok(
+    payload.recentEvents.some(
+      (event) =>
+        event.eventType === "route.completed" &&
+        event.runtimeRecommendation.recommendedMode === "stateless" &&
+        event.runtimeMode === "sticky",
+    ),
+  );
+});
+
+test("HTTP/SSE gateway treats malformed runtime hints as diagnostics only", async () => {
+  const controller = createHttpSseGatewayController();
+  const handler = createGatewayHttpHandler({ controller });
+
+  const initialized = await sendHttpMessage(handler, {
+    method: "initialize",
+    sessionId: "http-invalid-hints",
+    params: {
+      clientId: "invalid-hints-test",
+      runtimeHints: {
+        runtimeDurationMs: -1,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.deepEqual(initialized.runtimeRecommendation.signals.invalidHints, [
+    "runtimeDurationMs",
+  ]);
+  assert.ok(
+    initialized.runtimeRecommendation.reasons.some(
+      (reason) => reason.code === "invalid-runtime-hints-ignored",
+    ),
+  );
+});
+
 test("HTTP/SSE gateway reconnects within grace and rejects reconnects after grace expiry", async () => {
   const clock = createClock();
   const controller = createHttpSseGatewayController({

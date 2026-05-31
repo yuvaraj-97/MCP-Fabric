@@ -142,6 +142,9 @@ Lead: Codex.
 
 Classifier output must be diagnostic before it becomes routing behavior.
 
+Status: implemented for Phase 2 as `stateless`/`sticky` recommendations with
+structured reasons, scores, confidence, and observability events.
+
 Required properties:
 
 - no automatic placement;

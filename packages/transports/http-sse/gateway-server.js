@@ -5,6 +5,7 @@ import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-ap
 import { DEFAULT_GATEWAY_OPERATOR_CONFIG, resolveOperatorConfig } from "../../gateway/config/operator-config.js";
 import { LoadRouter, normalizeRuntimeMode } from "../../gateway/load-balancer/load-router.js";
 import { createGatewayObserver } from "../../gateway/observability/gateway-observer.js";
+import { analyzeRuntimeAffinity } from "../../gateway/runtime-classifier/runtime-classifier.js";
 import { createSessionRegistry } from "../../gateway/session-registry/create-session-registry.js";
 
 const MAX_JSON_BODY_BYTES = 1_048_576;
@@ -419,12 +420,25 @@ export function createHttpSseGatewayController({
         body,
         existingSessionRecord,
       });
+      const runtimeRecommendation = resolveRuntimeRecommendation({
+        body,
+        existingSessionRecord,
+        method,
+        runtimeMode,
+      });
       const requestNow = now();
       observer.record("request.received", {
         method,
         sessionId,
         existingSessionRecord: Boolean(existingSessionRecord),
         runtimeMode,
+        runtimeRecommendation,
+      });
+      observer.record("runtime.recommendation", {
+        method,
+        sessionId,
+        runtimeMode,
+        runtimeRecommendation,
       });
 
       if (method !== "initialize" && !existingSessionRecord) {
@@ -551,6 +565,7 @@ export function createHttpSseGatewayController({
         reusedExistingSession: route.reusedExistingSession,
         recoveryAction,
         runtimeMode: route.runtimeMode,
+        runtimeRecommendation,
       });
 
       return {
@@ -558,6 +573,7 @@ export function createHttpSseGatewayController({
         serverInstanceId: route.serverInstanceId,
         reusedExistingSession: route.reusedExistingSession,
         runtimeMode: route.runtimeMode,
+        runtimeRecommendation,
         recovery: {
           action: recoveryAction,
           registry: this.describeRegistry(),
@@ -793,6 +809,47 @@ function resolveRuntimeMode({ body, existingSessionRecord }) {
       statusCode: 400,
       message: cause.message,
     });
+  }
+}
+
+function resolveRuntimeRecommendation({ body, existingSessionRecord, method, runtimeMode }) {
+  try {
+    return analyzeRuntimeAffinity({
+      explicitRuntimeMode:
+        body.runtimeMode ?? body.params?.runtimeMode,
+      existingRuntimeMode: existingSessionRecord?.metadata?.runtimeMode,
+      method,
+      runtimeHints: body.runtimeHints ?? body.params?.runtimeHints ?? {},
+      transport: "http-sse",
+    });
+  } catch (cause) {
+    return {
+      phase: "recommendation-only",
+      automaticPlacement: false,
+      transport: "http-sse",
+      method: method ?? null,
+      effectiveRuntimeMode: runtimeMode,
+      explicitRuntimeMode: body.runtimeMode ?? body.params?.runtimeMode ?? null,
+      existingRuntimeMode: existingSessionRecord?.metadata?.runtimeMode ?? null,
+      recommendedMode: runtimeMode,
+      confidence: "low",
+      scores: {
+        stateless: 0,
+        sticky: 0,
+      },
+      signals: {
+        invalidHints: ["classifier-error"],
+      },
+      reasons: [
+        {
+          code: "classifier-error-ignored",
+          message: "Runtime recommendation failed and was ignored; explicit routing mode was preserved.",
+          weight: 0,
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+      ],
+      explicitOverride: false,
+    };
   }
 }
 

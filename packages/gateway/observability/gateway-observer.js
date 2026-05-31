@@ -12,6 +12,8 @@ export function createGatewayObserver({ limit = 100, now = () => Date.now() } = 
     totalStreamAttachments: 0,
     totalStreamDetachments: 0,
     totalInstanceUpdates: 0,
+    totalRuntimeRecommendations: 0,
+    totalRuntimeOverrideWarnings: 0,
   };
 
   return {
@@ -97,5 +99,12 @@ function applyCounterSideEffects(counters, eventType, payload) {
 
   if (eventType === "instance.updated") {
     counters.totalInstanceUpdates += 1;
+  }
+
+  if (eventType === "runtime.recommendation") {
+    counters.totalRuntimeRecommendations += 1;
+    if (payload.runtimeRecommendation?.explicitOverride) {
+      counters.totalRuntimeOverrideWarnings += 1;
+    }
   }
 }
