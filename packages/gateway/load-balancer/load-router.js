@@ -1,3 +1,8 @@
+export const RUNTIME_MODES = Object.freeze({
+  STATELESS: "stateless",
+  STICKY: "sticky",
+});
+
 export class LoadRouter {
   #sessionRegistry;
   #loadThreshold;
@@ -57,32 +62,37 @@ export class LoadRouter {
     this.#evaluateClusterPressure();
   }
 
-  async routeSession(sessionId) {
-    return this.#routeSession(sessionId, { includeTrace: false });
+  async routeSession(sessionId, options = {}) {
+    return this.#routeSession(sessionId, { ...options, includeTrace: false });
   }
 
-  async explainRoute(sessionId) {
-    return this.#routeSession(sessionId, { includeTrace: true });
+  async explainRoute(sessionId, options = {}) {
+    return this.#routeSession(sessionId, { ...options, includeTrace: true });
   }
 
-  async #routeSession(sessionId, { includeTrace }) {
+  async #routeSession(sessionId, { includeTrace, runtimeMode } = {}) {
     assertNonEmptyString(sessionId, "sessionId");
     const trace = [];
 
     const existing = await this.#sessionRegistry.get(sessionId);
+    const effectiveRuntimeMode = normalizeRuntimeMode(
+      runtimeMode ?? existing?.metadata?.runtimeMode ?? RUNTIME_MODES.STICKY,
+    );
     trace.push({
       type: "lookup",
       sessionId,
       existingServerInstanceId: existing?.serverInstanceId ?? null,
+      runtimeMode: effectiveRuntimeMode,
     });
 
     if (existing) {
       const assigned = this.#instances.get(existing.serverInstanceId);
-      if (assigned?.healthy) {
+      if (assigned?.healthy && effectiveRuntimeMode === RUNTIME_MODES.STICKY) {
         trace.push({
           type: "reuse-existing-session",
           serverInstanceId: assigned.serverInstanceId,
           load: assigned.load,
+          runtimeMode: effectiveRuntimeMode,
         });
 
         return finalizeDecision(
@@ -90,17 +100,30 @@ export class LoadRouter {
             sessionId,
             serverInstanceId: assigned.serverInstanceId,
             reusedExistingSession: true,
+            runtimeMode: effectiveRuntimeMode,
           },
           trace,
           includeTrace,
         );
       }
 
-      trace.push({
-        type: "existing-session-reassignment-required",
-        previousServerInstanceId: existing.serverInstanceId,
-        reason: assigned ? "instance-unhealthy" : "instance-missing",
-      });
+      if (assigned?.healthy && effectiveRuntimeMode === RUNTIME_MODES.STATELESS) {
+        trace.push({
+          type: "stateless-session-reassignment-allowed",
+          previousServerInstanceId: existing.serverInstanceId,
+          reason: "stateless-mode-does-not-require-affinity",
+          runtimeMode: effectiveRuntimeMode,
+        });
+      }
+
+      if (!assigned?.healthy) {
+        trace.push({
+          type: "existing-session-reassignment-required",
+          previousServerInstanceId: existing.serverInstanceId,
+          reason: assigned ? "instance-unhealthy" : "instance-missing",
+          runtimeMode: effectiveRuntimeMode,
+        });
+      }
     }
 
     const selected = this.#selectForNewSession(trace);
@@ -115,12 +138,15 @@ export class LoadRouter {
       throw error;
     }
 
-    await this.#sessionRegistry.assign(sessionId, selected.serverInstanceId);
+    await this.#sessionRegistry.assign(sessionId, selected.serverInstanceId, {
+      runtimeMode: effectiveRuntimeMode,
+    });
     trace.push({
       type: "session-assigned",
       sessionId,
       serverInstanceId: selected.serverInstanceId,
       reusedExistingSession: false,
+      runtimeMode: effectiveRuntimeMode,
     });
 
     return finalizeDecision(
@@ -128,6 +154,7 @@ export class LoadRouter {
         sessionId,
         serverInstanceId: selected.serverInstanceId,
         reusedExistingSession: false,
+        runtimeMode: effectiveRuntimeMode,
       },
       trace,
       includeTrace,
@@ -295,4 +322,12 @@ function assertNonEmptyString(value, name) {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${name} must be a non-empty string`);
   }
+}
+
+export function normalizeRuntimeMode(runtimeMode) {
+  if (runtimeMode === RUNTIME_MODES.STATELESS || runtimeMode === RUNTIME_MODES.STICKY) {
+    return runtimeMode;
+  }
+
+  throw new RangeError("runtimeMode must be one of: stateless, sticky");
 }

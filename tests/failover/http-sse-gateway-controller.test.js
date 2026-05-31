@@ -73,6 +73,67 @@ test("gateway controller reassigns the session when the original instance become
   assert.equal(echoed.reusedExistingSession, false);
 });
 
+test("gateway controller honors explicit stateless runtime mode", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-stateless",
+    params: {
+      clientId: "stateless-test",
+      runtimeMode: "stateless",
+    },
+  });
+
+  controller.upsertInstance({
+    serverInstanceId: "server-a",
+    load: 0.6,
+    healthy: true,
+    acceptingNewSessions: true,
+  });
+  controller.upsertInstance({
+    serverInstanceId: "server-b",
+    load: 0.1,
+    healthy: true,
+    acceptingNewSessions: true,
+  });
+
+  const echoed = await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: { message: "stateless follow-up" },
+  });
+
+  assert.equal(initialized.serverInstanceId, "server-a");
+  assert.equal(initialized.runtimeMode, "stateless");
+  assert.equal(echoed.serverInstanceId, "server-b");
+  assert.equal(echoed.reusedExistingSession, false);
+  assert.equal(echoed.runtimeMode, "stateless");
+  assert.equal(controller.sessionRegistry.get(initialized.sessionId).metadata.runtimeMode, "stateless");
+});
+
+test("gateway controller rejects unsupported runtime modes", async () => {
+  const controller = createHttpSseGatewayController();
+
+  await assert.rejects(
+    () =>
+      controller.handleGatewayMessage({
+        method: "initialize",
+        sessionId: "session-invalid-mode",
+        params: {
+          clientId: "invalid-mode-test",
+          runtimeMode: "pinned",
+        },
+      }),
+    /runtimeMode must be one of: stateless, sticky/,
+  );
+});
+
 test("gateway controller reconnects after restart when using a durable registry", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mcp-runtime-"));
   const filePath = join(dir, "sessions.json");

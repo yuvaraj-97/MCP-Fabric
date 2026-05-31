@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 
 import { createDemoApplicationServer } from "../../core/protocol-adapter/demo-application-server.js";
 import { DEFAULT_GATEWAY_OPERATOR_CONFIG, resolveOperatorConfig } from "../../gateway/config/operator-config.js";
-import { LoadRouter } from "../../gateway/load-balancer/load-router.js";
+import { LoadRouter, normalizeRuntimeMode } from "../../gateway/load-balancer/load-router.js";
 import { createGatewayObserver } from "../../gateway/observability/gateway-observer.js";
 import { createSessionRegistry } from "../../gateway/session-registry/create-session-registry.js";
 
@@ -415,11 +415,16 @@ export function createHttpSseGatewayController({
       const existingSessionRecord = sessionId
         ? await resolvedSessionRegistry.get(sessionId)
         : undefined;
+      const runtimeMode = resolveRuntimeMode({
+        body,
+        existingSessionRecord,
+      });
       const requestNow = now();
       observer.record("request.received", {
         method,
         sessionId,
         existingSessionRecord: Boolean(existingSessionRecord),
+        runtimeMode,
       });
 
       if (method !== "initialize" && !existingSessionRecord) {
@@ -453,11 +458,12 @@ export function createHttpSseGatewayController({
         });
       }
 
-      const route = await router.routeSession(sessionId);
+      const route = await router.routeSession(sessionId, { runtimeMode });
       const lifecycleMetadata = buildLifecycleMetadata({
         existingRecord: existingSessionRecord,
         clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
         now: requestNow,
+        runtimeMode,
         sessionTtlMs: effectiveSessionTtlMs,
       });
       await resolvedSessionRegistry.assign(
@@ -535,6 +541,7 @@ export function createHttpSseGatewayController({
         sessionId,
         serverInstanceId: route.serverInstanceId,
         reusedExistingSession: route.reusedExistingSession,
+        runtimeMode: route.runtimeMode,
         observedAt: new Date().toISOString(),
       });
       observer.record("route.completed", {
@@ -543,12 +550,14 @@ export function createHttpSseGatewayController({
         serverInstanceId: route.serverInstanceId,
         reusedExistingSession: route.reusedExistingSession,
         recoveryAction,
+        runtimeMode: route.runtimeMode,
       });
 
       return {
         sessionId,
         serverInstanceId: route.serverInstanceId,
         reusedExistingSession: route.reusedExistingSession,
+        runtimeMode: route.runtimeMode,
         recovery: {
           action: recoveryAction,
           registry: this.describeRegistry(),
@@ -752,9 +761,10 @@ function deriveReconnectState(existingSessionRecord, requestNow) {
   return "grace-expired";
 }
 
-function buildLifecycleMetadata({ existingRecord, clientId, now, sessionTtlMs }) {
+function buildLifecycleMetadata({ existingRecord, clientId, now, runtimeMode, sessionTtlMs }) {
   return {
     clientId,
+    runtimeMode,
     connectionState: "active",
     disconnectedAt: null,
     graceUntil: null,
@@ -765,6 +775,25 @@ function buildLifecycleMetadata({ existingRecord, clientId, now, sessionTtlMs })
         ? (existingRecord?.metadata?.reconnectCount ?? 0) + 1
         : (existingRecord?.metadata?.reconnectCount ?? 0),
   };
+}
+
+function resolveRuntimeMode({ body, existingSessionRecord }) {
+  const requestedRuntimeMode =
+    body.runtimeMode ??
+    body.params?.runtimeMode ??
+    existingSessionRecord?.metadata?.runtimeMode ??
+    "sticky";
+
+  try {
+    return normalizeRuntimeMode(requestedRuntimeMode);
+  } catch (cause) {
+    throw createGatewaySessionError({
+      sessionId: body.sessionId,
+      code: "invalid-runtime-mode",
+      statusCode: 400,
+      message: cause.message,
+    });
+  }
 }
 
 function applyDisconnectPolicy({

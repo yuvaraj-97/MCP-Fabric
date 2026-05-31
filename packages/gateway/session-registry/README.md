@@ -8,6 +8,15 @@ Initial mapping:
 session_id -> server_instance_id
 ```
 
+Phase 1 runtime mode metadata is stored with the mapping:
+
+```text
+metadata.runtimeMode -> "sticky" | "stateless"
+```
+
+`sticky` is the default. `stateless` keeps the session lifecycle record but does
+not require follow-up requests to reuse the previous instance.
+
 The first prototype can use in-memory storage. Durable storage can come later.
 
 Prototype implementation:

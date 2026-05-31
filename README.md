@@ -113,6 +113,8 @@ The implemented slices today are:
 - HTTP/SSE gateway with session stickiness, explicit reconnect/recovery actions,
   session TTL and reconnect grace-window enforcement, SSE event visibility, and
   basic operator observability
+- explicit Phase 1 runtime modes for gateway routing: `sticky` by default and
+  opt-in `stateless` request/session metadata
 - self-explaining local dashboard for routing behavior
 - automated tests for core dispatch, `stdio` transport behavior, stickiness,
   HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
@@ -199,6 +201,21 @@ The adaptive runtime fabric direction builds on this same order: reusable core
 first, gateway second, adaptive placement and runtime orchestration later. The
 near-term committed runtime modes are `stateless` and `sticky`; richer modes are
 reserved until their recovery and migration behavior is specified and validated.
+
+Runtime mode can be selected explicitly on gateway messages:
+
+```json
+{
+  "method": "initialize",
+  "params": {
+    "clientId": "example-client",
+    "runtimeMode": "stateless"
+  }
+}
+```
+
+If no mode is provided, the gateway uses `sticky`. Follow-up requests inherit the
+stored session mode unless an explicit override is provided.
 
 ## Install
 

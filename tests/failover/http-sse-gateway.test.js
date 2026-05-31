@@ -91,6 +91,85 @@ test("HTTP/SSE gateway reassigns the session when the original instance becomes 
   assert.equal(echoed.recovery.action, "reassigned-and-rehydrated");
 });
 
+test("HTTP/SSE gateway exposes explicit stateless runtime mode decisions", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+  const handler = createGatewayHttpHandler({ controller });
+
+  const initialized = await sendHttpMessage(handler, {
+    method: "initialize",
+    sessionId: "http-stateless",
+    params: {
+      clientId: "http-stateless-test",
+      runtimeMode: "stateless",
+    },
+  });
+
+  await sendInstanceUpdate(handler, {
+    serverInstanceId: "server-a",
+    load: 0.6,
+    healthy: true,
+    acceptingNewSessions: true,
+  });
+  await sendInstanceUpdate(handler, {
+    serverInstanceId: "server-b",
+    load: 0.1,
+    healthy: true,
+    acceptingNewSessions: true,
+  });
+
+  const echoed = await sendHttpMessage(handler, {
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: { message: "stateless over http" },
+  });
+
+  assert.equal(initialized.serverInstanceId, "server-a");
+  assert.equal(initialized.runtimeMode, "stateless");
+  assert.equal(echoed.serverInstanceId, "server-b");
+  assert.equal(echoed.reusedExistingSession, false);
+  assert.equal(echoed.runtimeMode, "stateless");
+
+  const observability = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: "/observability",
+    headers: { host: "127.0.0.1:3000" },
+  });
+  const payload = parseJsonBody(observability);
+  assert.ok(
+    payload.recentEvents.some(
+      (event) => event.eventType === "route.completed" && event.runtimeMode === "stateless",
+    ),
+  );
+});
+
+test("HTTP/SSE gateway rejects unsupported runtime modes with a client error", async () => {
+  const controller = createHttpSseGatewayController();
+  const handler = createGatewayHttpHandler({ controller });
+
+  const response = await invokeHttpHandler(handler, {
+    method: "POST",
+    url: "/message",
+    headers: { host: "127.0.0.1:3000" },
+    body: {
+      method: "initialize",
+      sessionId: "http-invalid-mode",
+      params: {
+        clientId: "invalid-mode-test",
+        runtimeMode: "pinned",
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  const payload = parseJsonBody(response);
+  assert.equal(payload.code, "invalid-runtime-mode");
+});
+
 test("HTTP/SSE gateway reconnects within grace and rejects reconnects after grace expiry", async () => {
   const clock = createClock();
   const controller = createHttpSseGatewayController({

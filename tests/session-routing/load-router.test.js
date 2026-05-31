@@ -17,6 +17,7 @@ test("assigns a new session to the least-loaded healthy instance", async () => {
     sessionId: "session-1",
     serverInstanceId: "server-b",
     reusedExistingSession: false,
+    runtimeMode: "sticky",
   });
   assert.equal(registry.get("session-1").serverInstanceId, "server-b");
 });
@@ -35,6 +36,7 @@ test("routes an existing session back to its assigned healthy instance", async (
     sessionId: "session-1",
     serverInstanceId: "server-a",
     reusedExistingSession: true,
+    runtimeMode: "sticky",
   });
 });
 
@@ -78,8 +80,59 @@ test("reassigns a session when the previous instance is unhealthy", async () => 
     sessionId: "session-1",
     serverInstanceId: "server-b",
     reusedExistingSession: false,
+    runtimeMode: "sticky",
   });
   assert.equal(registry.get("session-1").serverInstanceId, "server-b");
+});
+
+test("stateless mode bypasses existing healthy session affinity", async () => {
+  const registry = new MemorySessionRegistry();
+  const router = new LoadRouter({ sessionRegistry: registry });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.6 });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.1 });
+  registry.assign("session-1", "server-a", { runtimeMode: "stateless" });
+
+  const route = await router.routeSession("session-1");
+
+  assert.deepEqual(route, {
+    sessionId: "session-1",
+    serverInstanceId: "server-b",
+    reusedExistingSession: false,
+    runtimeMode: "stateless",
+  });
+  assert.equal(registry.get("session-1").serverInstanceId, "server-b");
+  assert.equal(registry.get("session-1").metadata.runtimeMode, "stateless");
+});
+
+test("explicit stateless mode can override a previously sticky session", async () => {
+  const registry = new MemorySessionRegistry();
+  const router = new LoadRouter({ sessionRegistry: registry });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.6 });
+  router.upsertInstance({ serverInstanceId: "server-b", load: 0.1 });
+  registry.assign("session-1", "server-a", { runtimeMode: "sticky" });
+
+  const decision = await router.explainRoute("session-1", { runtimeMode: "stateless" });
+
+  assert.equal(decision.serverInstanceId, "server-b");
+  assert.equal(decision.reusedExistingSession, false);
+  assert.equal(decision.runtimeMode, "stateless");
+  assert.ok(
+    decision.trace.some((entry) => entry.type === "stateless-session-reassignment-allowed"),
+  );
+});
+
+test("rejects unsupported runtime modes", async () => {
+  const registry = new MemorySessionRegistry();
+  const router = new LoadRouter({ sessionRegistry: registry });
+
+  router.upsertInstance({ serverInstanceId: "server-a", load: 0.1 });
+
+  await assert.rejects(
+    () => router.routeSession("session-1", { runtimeMode: "pinned" }),
+    /runtimeMode must be one of: stateless, sticky/,
+  );
 });
 
 test("fails clearly when no instance can accept a new session", async () => {
