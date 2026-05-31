@@ -16,6 +16,10 @@ export function createGatewayObserver({ limit = 100, now = () => Date.now() } = 
     totalRuntimeOverrideWarnings: 0,
     totalAdaptivePlacements: 0,
     totalAdaptivePlacementDrifts: 0,
+    totalAdaptivePlacementStateless: 0,
+    totalAdaptivePlacementSticky: 0,
+    totalAdaptivePlacementFallbacks: 0,
+    totalAdaptivePlacementMismatches: 0,
   };
 
   return {
@@ -115,5 +119,18 @@ function applyCounterSideEffects(counters, eventType, payload) {
     if (payload.driftFromPhase2Mode) {
       counters.totalAdaptivePlacementDrifts += 1;
     }
+    if (payload.runtimeMode === "stateless") {
+      counters.totalAdaptivePlacementStateless += 1;
+    } else if (payload.runtimeMode === "sticky") {
+      counters.totalAdaptivePlacementSticky += 1;
+    }
+  }
+
+  if (eventType === "adaptive.placement.fallback") {
+    counters.totalAdaptivePlacementFallbacks += 1;
+  }
+
+  if (eventType === "adaptive.placement.mismatch") {
+    counters.totalAdaptivePlacementMismatches += 1;
   }
 }

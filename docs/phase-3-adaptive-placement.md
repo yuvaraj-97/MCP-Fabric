@@ -96,16 +96,45 @@ understand routing decisions:
 - `invalid-classifier-recommendation`: The classifier returned an invalid
   recommendation; Phase 2 default applies.
 
+## Quality Reporting Counters
+
 Operator counters include:
 
 - `summary.totalAdaptivePlacements`;
-- `summary.totalAdaptivePlacementDrifts`.
+- `summary.totalAdaptivePlacementDrifts`;
+- `summary.totalAdaptivePlacementStateless` — increments when adaptive placement
+  applies the classifier recommendation for a new session with stateless mode;
+- `summary.totalAdaptivePlacementSticky` — increments when adaptive placement
+  applies the classifier recommendation for a new session with sticky mode;
+- `summary.totalAdaptivePlacementFallbacks` — increments when the adaptive gate
+  is enabled but placement is not applied due to explicit override, existing
+  session, canary-not-allowed, or invalid-classifier-recommendation;
+- `summary.totalAdaptivePlacementMismatches` — increments when a request with
+  `adaptivePlacement.applied=true` fails during downstream application
+  handling, indicating a potential mismatch between the classifier
+  recommendation and actual application requirements.
 
 `totalAdaptivePlacementDrifts` increments when the adaptive mode differs from
 the Phase 2 routing mode that would have been used with the flag disabled.
 The `/observability` response also includes
 `operatorConfig.adaptivePlacementEnabled` so operators can confirm the active
 flag state.
+
+## Canary Monitoring
+
+Operators monitoring a canary rollout should observe:
+
+- Rising `totalAdaptivePlacementStateless` and `totalAdaptivePlacementSticky`
+  as new sessions are routed using recommendations;
+- `totalAdaptivePlacementFallbacks` tracking clients and sessions that did not
+  receive adaptive placement;
+- No increase in `totalAdaptivePlacementMismatches` if the classifier
+  recommendations are sound; a rising mismatch counter signals potential
+  quality issues requiring investigation or rollback.
+
+Events `adaptive.placement.fallback` are emitted with `source`, `runtimeModeSource`,
+`method`, `sessionId`, and `clientId` fields, enabling detailed audit logs for
+fallback reasons during canary validation.
 
 ## Rollback
 
