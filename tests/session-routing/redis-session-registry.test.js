@@ -102,6 +102,35 @@ test("redis session registry uses native redis ttl when expiresAt metadata exist
   assert.equal((await registry.list()).length, 0);
 });
 
+test("redis session registry connects lazy clients before issuing commands", async () => {
+  const client = createFakeRedisClient();
+  let connectCalls = 0;
+  client.status = "wait";
+  client.connect = async () => {
+    connectCalls += 1;
+    client.status = "ready";
+  };
+
+  const registry = new RedisSessionRegistry({ client, key: "sessions:test" });
+
+  await registry.assign("session-1", "server-a");
+  assert.equal((await registry.get("session-1")).serverInstanceId, "server-a");
+  assert.equal(connectCalls, 1);
+});
+
+test("redis session registry connects clients that expose connect without status", async () => {
+  const client = createFakeRedisClient();
+  let connected = false;
+  client.connect = async () => {
+    connected = true;
+  };
+
+  const registry = new RedisSessionRegistry({ client, key: "sessions:test" });
+
+  await registry.assign("session-1", "server-a");
+  assert.equal(connected, true);
+});
+
 test("redis session registry can read and migrate legacy aggregate state", async () => {
   const client = createFakeRedisClient();
   await client.set(

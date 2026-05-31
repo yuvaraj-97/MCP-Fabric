@@ -242,6 +242,9 @@ The response includes `runtimeRecommendation`, and `/observability` records
 `runtime.recommendation` events. Explicit `runtimeMode` still wins over any
 recommendation.
 
+Phase 2 validation and production gates are documented in
+[docs/phase-2-validation-production-gates.md](./docs/phase-2-validation-production-gates.md).
+
 ## Install
 
 Use Node.js 20 or newer.

@@ -1,4 +1,4 @@
-import { fetchJson } from "../multicontainer/http-utils.js";
+import { delay, fetchJson } from "../multicontainer/http-utils.js";
 
 const DEFAULT_RELATIVE_PATH = "notes/shared-redis-proof.txt";
 const DEFAULT_CONTENT = "shared redis gateway proof works";
@@ -17,6 +17,12 @@ export async function runSharedRedisGatewayProof({
       "Both gatewayABaseUrl and gatewayBBaseUrl are required for the shared Redis proof",
     );
   }
+
+  await Promise.all([
+    waitForGateway(gatewayABaseUrl),
+    waitForGateway(gatewayBBaseUrl),
+    ...Object.values(remoteServerBaseUrls ?? {}).map((baseUrl) => waitForGateway(baseUrl)),
+  ]);
 
   const initialized = await sendGatewayMessage(gatewayABaseUrl, {
     method: "initialize",
@@ -126,4 +132,20 @@ function parseRemoteServerUrls(rawValue) {
 
 function trimSlash(value) {
   return value.replace(/\/+$/, "");
+}
+
+async function waitForGateway(gatewayBaseUrl, { attempts = 120, delayMs = 500 } = {}) {
+  const url = `${trimSlash(gatewayBaseUrl)}/health`;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fetchJson(url);
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(delayMs);
+    }
+  }
+
+  throw lastError ?? new Error(`Gateway did not become ready: ${gatewayBaseUrl}`);
 }

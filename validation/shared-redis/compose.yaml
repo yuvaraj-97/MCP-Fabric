@@ -10,6 +10,7 @@ services:
     volumes:
       - ../..:/workspace
     environment:
+      HOST: "0.0.0.0"
       PORT: "4101"
       ROOT_DIR: /workspace/validation-artifacts/shared-redis
       SERVER_INSTANCE_ID: fs-a
@@ -21,6 +22,7 @@ services:
     volumes:
       - ../..:/workspace
     environment:
+      HOST: "0.0.0.0"
       PORT: "4102"
       ROOT_DIR: /workspace/validation-artifacts/shared-redis
       SERVER_INSTANCE_ID: fs-b

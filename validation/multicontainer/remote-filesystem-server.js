@@ -4,6 +4,7 @@ import { createFilesystemValidationApplication } from "../../examples/shared/fil
 import { snapshotFilesystemValidationWorkspace } from "../filesystem/workspace.js";
 
 const port = Number.parseInt(process.env.PORT ?? "0", 10);
+const host = process.env.HOST ?? "127.0.0.1";
 const rootDir = process.env.ROOT_DIR;
 const serverInstanceId = process.env.SERVER_INSTANCE_ID ?? "fs-remote";
 
@@ -49,13 +50,14 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "127.0.0.1", () => {
+server.listen(port, host, () => {
   const address = server.address();
   console.log(JSON.stringify({
     type: "ready",
     kind: "filesystem-remote-server",
     serverInstanceId,
     port: address.port,
+    host,
     rootDir,
   }));
 });

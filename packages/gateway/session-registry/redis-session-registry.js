@@ -1,5 +1,6 @@
 export class RedisSessionRegistry {
   #client;
+  #connectPromise;
   #closeClientOnClose;
   #key;
   #now;
@@ -187,6 +188,7 @@ export class RedisSessionRegistry {
   }
 
   async #readRecord(sessionId) {
+    await this.#ensureConnected();
     const key = this.#sessionKey(sessionId);
     const record = normalizeRecord(JSON.parse((await this.#client.get(key)) || "null"), sessionId);
     if (record) {
@@ -197,6 +199,7 @@ export class RedisSessionRegistry {
   }
 
   async #readRecordByKey(key) {
+    await this.#ensureConnected();
     const raw = await this.#client.get(key);
     if (!raw) {
       return undefined;
@@ -224,6 +227,7 @@ export class RedisSessionRegistry {
   }
 
   async #writeRecord(record) {
+    await this.#ensureConnected();
     const normalized = normalizeRecord(record);
     if (!normalized) {
       return;
@@ -250,6 +254,7 @@ export class RedisSessionRegistry {
   }
 
   async #deleteKey(key) {
+    await this.#ensureConnected();
     if (typeof this.#client.del === "function") {
       await this.#client.del(key);
       return;
@@ -259,6 +264,7 @@ export class RedisSessionRegistry {
   }
 
   async #listSessionKeys() {
+    await this.#ensureConnected();
     const pattern = `${this.#key}:session:*`;
     if (typeof this.#client.scan === "function") {
       const keys = [];
@@ -299,6 +305,25 @@ export class RedisSessionRegistry {
 
   #sessionKey(sessionId) {
     return `${this.#key}:session:${encodeURIComponent(sessionId)}`;
+  }
+
+  async #ensureConnected() {
+    if (typeof this.#client.connect !== "function") {
+      return;
+    }
+
+    if (this.#client.status === "ready") {
+      return;
+    }
+
+    if (!this.#connectPromise) {
+      this.#connectPromise = this.#client.connect().catch((error) => {
+        this.#connectPromise = undefined;
+        throw error;
+      });
+    }
+
+    await this.#connectPromise;
   }
 }
 
