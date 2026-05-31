@@ -1,331 +1,353 @@
-# Adaptive Runtime Fabric Audit Plan
+# MCP-Fabric: New Session Context & Working Instructions
 
-## Purpose
+You are joining an existing project called MCP-Fabric.
 
-This document captures the copied session context for MCP-Fabric and turns it
-into a readable architecture brief and audit plan for this repository.
+Your role is not to immediately start coding. Your first responsibility is to
+understand the repository, audit the current architecture, identify gaps
+relative to the target vision below, and then help plan and implement changes
+incrementally with tests and documentation.
 
-The original source was copied in small chunks from another platform, so this
-version removes chat timestamps, repairs formatting, and keeps the plan
-structured. No implementation should start from this document alone; it first
-calls for a repository audit and roadmap.
+---
 
-## Source Integrity Notes
-
-- The copied source included a separate chat chunk for Step 6. It appears to be
-  a continuation of the workflow after Step 5, not a replacement for missing
-  steps.
-- No explicit `set 1`, `set 2`, `set 3`, or `set 4` markers were present in the
-  copied file. If those markers existed in the original platform, they were not
-  included in `plan1.md`.
-- The content below avoids inventing missing details. Where the source only
-  provided strategy or examples, this document keeps them as strategy or
-  examples.
-
-## Project Context
+# Project Vision
 
 MCP-Fabric is evolving beyond a simple MCP router or scaling layer.
 
-The long-term vision is an adaptive runtime fabric for MCP and AI agents. The
-fabric should provide:
+The long-term vision is:
 
-- Transport abstraction
-- Runtime orchestration
-- Execution placement
-- State topology management
-- Lifecycle management
-- Recovery and resilience
-- Workload-aware routing
+**Adaptive Runtime Fabric for MCP and AI Agents**
 
-The fabric should support stateless, stateful, and hybrid execution without
-forcing developers to understand distributed systems concepts. It should
-automatically make reasonable runtime decisions whenever possible.
+The fabric should provide:
 
-The intended direction is closer to "Kubernetes for MCP runtimes" than "MCP load
-balancer."
+- transport abstraction
+- runtime orchestration
+- execution placement
+- state topology management
+- lifecycle management
+- recovery and resilience
+- workload-aware routing
 
-## Core Design Principles
+The fabric should support:
 
-### Runtime-Agnostic
+1. Stateless execution
+2. Stateful execution
+3. Hybrid execution
 
-The fabric should not care whether state is local, external, or hybrid.
+without forcing developers to understand distributed systems concepts.
+
+The fabric should automatically make good runtime decisions whenever possible.
+
+Think:
+
+> Kubernetes for MCP runtimes
+
+rather than:
+
+> MCP load balancer
+
+---
+
+# Core Design Principles
+
+## Principle 1: Runtime-Agnostic
+
+The fabric should not care whether state is:
+
+- local
+- external
+- hybrid
 
 The fabric manages:
 
-- Routing
-- Placement
-- Lifecycle
-- Coordination
-- Recovery
+- routing
+- placement
+- lifecycle
+- coordination
+- recovery
 
 State strategy is an implementation detail.
 
-### Adaptive by Default
+---
 
-The default developer experience should be simple:
+## Principle 2: Adaptive by Default
+
+Default developer experience:
 
 ```python
 fabric.run(task)
 ```
 
-The fabric should eventually determine whether execution should be stateless,
-sticky, or hybrid.
+The fabric determines:
 
-Developers may override decisions:
+- stateless
+- sticky
+- hybrid
+
+automatically.
+
+Developers may override decisions.
+
+Example:
 
 ```python
 fabric.run(task, mode="sticky")
 ```
 
+or
+
 ```python
 fabric.run(task, mode="stateless")
 ```
 
-### Explicit Override Always Wins
+---
 
-Automatic classification must never remove developer control.
+## Principle 3: Explicit Override Always Wins
 
-Developer hints must override adaptive behavior:
+Automatic classification should never remove control.
+
+Developer hints must override adaptive behavior.
+
+Example:
 
 ```python
 @fabric.stateful()
 ```
 
+or
+
 ```python
 @fabric.stateless()
 ```
 
-### Progressive Intelligence
+must take precedence over inferred behavior.
 
-The system should evolve in phases:
+---
 
-1. Explicit modes only.
-2. Adaptive recommendations, such as "Detected browser session. Sticky runtime
-   recommended."
-3. Automatic adaptive selection.
-4. Self-optimizing runtime orchestration.
+## Principle 4: Progressive Intelligence
+
+The system should evolve in phases.
+
+Phase 1:
+
+- Explicit modes only
+
+Phase 2:
+
+- Adaptive recommendations
+
+Example:
+
+> Detected browser session. Sticky runtime recommended.
+
+Phase 3:
+
+- Automatic adaptive selection
+
+Phase 4:
+
+- Self-optimizing runtime orchestration
 
 Avoid over-automation early.
 
-## Runtime Modes
+---
 
-### Stateless
+# Runtime Modes
+
+The fabric should support at minimum:
+
+## Stateless
 
 Characteristics:
 
-- Replayable
-- Horizontally scalable
-- No affinity
-- Ephemeral workers
-- Externalized state
+- replayable
+- horizontally scalable
+- no affinity
+- ephemeral workers
+- externalized state
 
 Capabilities:
 
-- Load balancing
-- Retries
-- Worker replacement
-- Autoscaling
+- load balancing
+- retries
+- worker replacement
+- autoscaling
 
-### Soft Sticky
+---
+
+## Soft Sticky
 
 Characteristics:
 
-- Prefer the same worker
-- Allow fallback
+- prefer same worker
+- fallback allowed
 
 Useful for:
 
-- Warm caches
-- Model sessions
-- Lightweight continuity
+- warm caches
+- model sessions
+- lightweight continuity
 
-### Sticky
+---
+
+## Sticky
 
 Characteristics:
 
-- Strong affinity
-- Preserved local runtime state
+- strong affinity
+- local runtime state preserved
 
 Useful for:
 
 - IDE agents
-- Browser automation
-- Interactive sessions
+- browser automation
+- interactive sessions
 
-### Pinned
+---
+
+## Pinned
 
 Characteristics:
 
-- Cannot migrate
-- Tied to worker ownership
+- cannot migrate
+- tied to worker ownership
 
 Useful for:
 
-- Active terminals
-- Live subprocesses
-- Resource handles
+- active terminals
+- live subprocesses
+- resource handles
 
-### Hybrid
+---
+
+## Hybrid
 
 Characteristics:
 
-- External state, such as memory, vectors, and planning graphs
-- Local state, such as browser instances, filesystem state, WebSockets, and
-  subprocesses
+External State:
 
-Hybrid execution is expected to become the dominant mode for advanced agents.
+- memory
+- vectors
+- planning graph
 
-## Runtime Affinity Continuum
+Local State:
 
-Runtime placement decisions should not be treated as a binary choice between
-stateless and stateful. They should be modeled as runtime affinity, where
-workloads exist on a continuum.
+- browser
+- filesystem
+- websocket
+- subprocesses
 
-| Mode | Meaning |
-| --- | --- |
-| Stateless | Fully replayable with no affinity |
-| Soft Sticky | Prefer the same worker but allow migration |
-| Sticky | Strong affinity to the previous worker |
-| Pinned | Cannot migrate while active |
-| Hybrid | Combination of externalized state and local runtime state |
+Expected to become the dominant mode for advanced agents.
 
-The classification system should choose among these affinity levels.
+---
 
-## Adaptive Runtime Classification
+# Runtime Classification Vision
 
-A long-term goal of MCP-Fabric is to automatically classify workloads and select
-an appropriate execution topology. Developers should not need distributed
-systems expertise to get reasonable default behavior.
+The fabric should eventually classify workloads automatically.
 
-The future runtime classifier should be a dedicated subsystem:
+Potential signals:
 
-```text
-Request
-  -> Runtime Analyzer
-  -> Classification Engine
-  -> Affinity Decision
-  -> Worker Placement
-  -> Execution
-```
+## Streaming
 
-The classifier should produce recommendations or decisions about runtime
-affinity.
-
-## Workload Signals
-
-The classifier should evaluate observable workload characteristics.
-
-### Streaming
-
-Indicators:
+Examples:
 
 - WebSocket
-- Server-sent events
-- Bidirectional transports
-- Token streaming
+- SSE
+- token streaming
 
-Signal: increase affinity score.
+Signal:
 
-### Resource Ownership
+stateful tendency
 
-Indicators:
+---
 
-- Browser instance
-- Filesystem sandbox
-- Subprocess
-- Terminal session
-- GPU context
+## Resource Ownership
 
-Signal: increase affinity score significantly.
+Examples:
 
-### Runtime Duration
+- browser instance
+- filesystem sandbox
+- subprocess
+- terminal
+- GPU session
 
-Short-lived requests reduce affinity score.
+Signal:
 
-Long-running executions increase affinity score.
+sticky/pinned tendency
 
-### Replay Safety
+---
 
-Replay-safe execution reduces affinity score. Examples:
+## Execution Duration
 
-- Search query
-- Weather lookup
-- Read-only database query
+Short:
 
-Replay-unsafe execution increases affinity score. Examples:
+- stateless candidate
 
-- Browser clicks
-- Terminal execution
-- Payment actions
-- External mutations
+Long:
 
-### External State Availability
+- sticky candidate
 
-If state already exists externally, affinity requirements may be reduced.
+---
 
-Potential external state systems include:
+## Replay Safety
+
+Replay-safe:
+
+- stateless
+
+Replay-unsafe:
+
+- sticky/stateful
+
+---
+
+## External State Availability
+
+If state already exists in:
 
 - Redis
 - Postgres
 - Temporal
-- Kafka
 - NATS
+- Kafka
 
-### Initialization Cost
+then stateless execution becomes easier.
 
-Expensive startup costs should increase affinity. Examples:
+---
 
-- Browser launch
-- Sandbox creation
-- Large model warmup
-- Container preparation
+## Initialization Cost
 
-## Affinity Scoring Model
+Expensive startup:
 
-The implementation is intentionally flexible. One possible model:
+- browser launch
+- sandbox creation
+- model warmup
 
-```python
-score = {
-    "streaming": True,
-    "resource_handles": True,
-    "external_memory": False,
-    "replay_safe": False,
-    "runtime_duration": "long",
-}
-```
+favours runtime affinity.
 
-Possible result:
+---
 
-```python
-mode = "sticky"
-```
+# State Topology Management
 
-or:
+This is a major differentiator.
 
-```python
-mode = "hybrid"
-```
+The fabric should eventually manage:
 
-The exact algorithm is not important initially. The architecture must allow the
-classifier to evolve without major redesign.
+- state placement
+- state ownership
+- state references
+- affinity
+- migration rules
+- recovery semantics
 
-## State Topology Management
+rather than simply routing requests.
 
-State topology management is a major differentiator. The fabric should
-eventually manage:
+---
 
-- State placement
-- State ownership
-- State references
-- Affinity
-- Migration rules
-- Recovery semantics
+# Desired SDK Direction
 
-The goal is to manage state topology, not simply route requests.
+A Python SDK is planned.
 
-## SDK Direction
-
-A Python SDK is planned. Example aspirations:
+Example aspirations:
 
 ```python
 @fabric.task()
@@ -345,114 +367,128 @@ async def browser_agent():
     ...
 ```
 
-```python
-@fabric.pinned()
-async def terminal_agent():
-    ...
-```
-
 The SDK should feel simple while exposing advanced capabilities when needed.
+
 Developer ergonomics are critical.
 
-## Future State Backends
+---
 
-Design with pluggability in mind. Candidate backends include:
+# Potential Future State Backends
+
+Design with pluggability in mind.
+
+Candidates:
 
 - Redis
 - Postgres
 - Temporal
 - NATS
 - Kafka
-- In-memory
+- in-memory
 
-Do not tightly couple the architecture to a single backend.
+Do not tightly couple architecture to a single backend.
 
-## Future Recovery Semantics
+---
 
-The architecture should eventually support these workload recovery modes:
+# Potential Future Recovery Semantics
 
-- Replayable
-- Resumable
-- Pinned
-- Migratable
+The architecture should eventually support:
 
-## Recommended Implementation Phases
+- replayable
+- resumable
+- pinned
+- migratable
 
-### Phase 1: Explicit Modes
+workloads.
 
-Support developer-selected modes only. Do not implement automatic placement yet.
+---
 
-### Phase 2: Classification Analysis
+# Expectations For This Session
 
-Generate recommendations without automatic decisions. Example:
+Do NOT immediately refactor code.
 
-```text
-Browser resources detected. Sticky execution recommended.
-```
+Follow this workflow:
 
-### Phase 3: Adaptive Placement
+## Step 1
 
-Enable adaptive placement while retaining developer override.
-
-### Phase 4: Self-Optimizing Placement
-
-Add self-optimizing placement and affinity tuning after the lower-level runtime
-model is proven.
-
-## Expectations For The Next Session
-
-Do not immediately refactor code. Follow this workflow instead.
-
-### Step 1: Audit The Repository
+Audit the repository.
 
 Produce:
 
-- Architecture overview
-- Module map
-- Runtime flow map
-- Dependency map
+- architecture overview
+- module map
+- runtime flow map
+- dependency map
 
-### Step 2: Compare Against The Target Vision
+---
+
+## Step 2
+
+Compare current implementation against the target vision.
 
 Identify:
 
-- Strengths
-- Gaps
-- Architectural risks
-- Technical debt
+- strengths
+- gaps
+- architectural risks
+- technical debt
 
-### Step 3: Create A Prioritized Roadmap
+---
 
-Categorize work into:
+## Step 3
 
-- Immediate
-- Near-term
-- Long-term
+Create a prioritized roadmap.
+
+Categorize:
+
+- immediate
+- near-term
+- long-term
 
 Include effort estimates.
 
-### Step 4: Propose Architecture Changes Before Implementing
+---
 
-Explain tradeoffs and wait for approval when changes are significant.
+## Step 4
 
-### Step 5: Implement Incrementally
+Propose architecture changes before implementing.
 
-For every change, update these together:
+Explain tradeoffs.
 
-- Code
-- Tests
-- Documentation
+Wait for approval when changes are significant.
 
-### Step 6: Keep Architecture Documentation Current
+---
 
-Whenever architecture changes, update:
+## Step 5
+
+Implement incrementally.
+
+For every change:
+
+- code
+- tests
+- docs
+
+must be updated together.
+
+---
+
+## Step 6
+
+Keep architecture documentation current.
+
+Whenever architecture changes:
+
+Update:
 
 - README
-- Architecture decision records
-- Architecture diagrams
-- Developer docs
+- ADRs
+- architecture diagrams
+- developer docs
 
-## Important Constraints
+---
+
+# Important Constraints
 
 - Prefer simple solutions over clever ones.
 - Avoid premature abstraction.
@@ -462,7 +498,9 @@ Whenever architecture changes, update:
 - Maintain backward compatibility when reasonable.
 - Keep the architecture understandable by open-source contributors.
 
-## First Task
+---
+
+# First Task
 
 Perform a complete repository audit.
 
@@ -479,17 +517,300 @@ Deliver:
 
 Do not start coding until the audit and roadmap are complete.
 
-## Strategic Pillar
+---
 
-A major differentiator for MCP-Fabric should be workload-aware runtime
-placement.
+# Additional Architectural Context: Adaptive Runtime Classification Engine
+
+The following guidance should be treated as an extension of the project vision.
+
+---
+
+# Core Principle
+
+Runtime placement decisions should not be binary.
+
+Avoid thinking in terms of:
+
+- stateless
+- stateful
+
+Instead think in terms of:
+
+**runtime affinity**
+
+where workloads exist on a continuum.
+
+---
+
+# Runtime Affinity Continuum
+
+The fabric should eventually support:
+
+| Mode | Meaning |
+| --- | --- |
+| Stateless | Fully replayable, no affinity |
+| Soft Sticky | Prefer same worker but migration allowed |
+| Sticky | Strong affinity to previous worker |
+| Pinned | Cannot migrate while active |
+| Hybrid | Combination of externalized state and local runtime state |
+
+The classification system should choose among these affinity levels.
+
+---
+
+# Adaptive Runtime Classification
+
+A long-term goal of MCP-Fabric is to automatically classify workloads and select
+an appropriate execution topology.
+
+Developers should not be required to understand distributed systems concepts in
+order to obtain reasonable behavior.
+
+The system should make intelligent decisions automatically.
+
+Example:
+
+```python
+fabric.run(task)
+```
+
+should eventually be sufficient for most workloads.
+
+Explicit overrides must always remain available.
+
+---
+
+# Runtime Classifier
+
+Treat runtime classification as a dedicated subsystem.
+
+Potential architecture:
+
+```text
+Request
+  -> Runtime Analyzer
+  -> Classification Engine
+  -> Affinity Decision
+  -> Worker Placement
+  -> Execution
+```
+
+The classifier should produce recommendations or decisions about runtime
+affinity.
+
+---
+
+# Workload Signals
+
+The classifier should evaluate observable workload characteristics.
+
+Examples:
+
+## Streaming
+
+Indicators:
+
+- WebSocket
+- SSE
+- bidirectional transports
+- token streaming
+
+Signal:
+
+increase affinity score
+
+---
+
+## Resource Handles
+
+Indicators:
+
+- browser instance
+- filesystem sandbox
+- subprocess
+- terminal session
+- GPU context
+
+Signal:
+
+increase affinity score significantly
+
+---
+
+## Runtime Duration
+
+Short-lived request:
+
+reduce affinity score
+
+Long-running execution:
+
+increase affinity score
+
+---
+
+## Replay Safety
+
+Replay-safe execution:
+
+reduce affinity score
+
+Replay-unsafe execution:
+
+increase affinity score
+
+Examples:
+
+Replay-safe:
+
+- search query
+- weather lookup
+- read-only database query
+
+Replay-unsafe:
+
+- browser clicks
+- terminal execution
+- payment actions
+- external mutations
+
+---
+
+## External State Availability
+
+If state already exists externally:
+
+- Redis
+- Postgres
+- Temporal
+- Kafka
+- NATS
+
+then affinity requirements may be reduced.
+
+---
+
+## Initialization Cost
+
+Expensive startup costs should increase affinity.
+
+Examples:
+
+- browser launch
+- sandbox creation
+- large model warmup
+- container preparation
+
+---
+
+# Affinity Scoring Model
+
+The implementation is intentionally flexible.
+
+One possible model:
+
+```python
+score = {
+    "streaming": True,
+    "resource_handles": True,
+    "external_memory": False,
+    "replay_safe": False,
+    "runtime_duration": "long",
+}
+```
+
+Result:
+
+```python
+mode = "sticky"
+```
+
+or
+
+```python
+mode = "hybrid"
+```
+
+depending on scoring.
+
+The exact algorithm is not important initially.
+
+The architecture must allow classifier evolution without major redesign.
+
+---
+
+# Initial Recommendation
+
+Do NOT implement automatic placement immediately.
+
+Use a phased approach.
+
+Phase 1:
+
+- Explicit developer-selected modes
+
+Phase 2:
+
+- Classification analysis only
+- Recommendations generated
+- No automatic decisions
+
+Example:
+
+> Browser resources detected. Sticky execution recommended.
+
+Phase 3:
+
+- Adaptive placement enabled
+- Developer override retained
+
+Phase 4:
+
+- Self-optimizing placement and affinity tuning
+
+---
+
+# SDK Vision
+
+Future SDKs should expose adaptive execution naturally.
+
+Examples:
+
+```python
+@fabric.task()
+```
+
+```python
+@fabric.adaptive()
+```
+
+```python
+@fabric.stateful()
+```
+
+```python
+@fabric.pinned()
+```
+
+The SDK should hide infrastructure complexity while allowing advanced users to
+control placement policies.
+
+---
+
+# Architectural Goal
+
+A major differentiator for MCP-Fabric should be:
+
+**Workload-Aware Runtime Placement**
 
 The fabric should eventually understand:
 
-- What a workload is doing
-- What state it owns
-- Whether it can be replayed
-- Whether it can migrate
-- How much affinity it requires
+- what a workload is doing
+- what state it owns
+- whether it can be replayed
+- whether it can migrate
+- how much affinity it requires
 
-Then it should select the most appropriate runtime topology automatically.
+and select the most appropriate runtime topology automatically.
+
+This capability should be considered a strategic pillar of the platform.
