@@ -193,6 +193,172 @@ test("gateway controller returns recommendation-only classifier diagnostics", as
   );
 });
 
+test("adaptive placement uses classifier recommendation for new sessions when enabled", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-stateless",
+    params: {
+      clientId: "adaptive-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.phase, "adaptive-placement");
+  assert.equal(initialized.runtimeRecommendation.automaticPlacement, true);
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.effectiveRuntimeMode, "stateless");
+  assert.deepEqual(initialized.runtimeRecommendation.adaptivePlacement, {
+    enabled: true,
+    applied: true,
+    source: "classifier-recommendation",
+    runtimeModeSource: "adaptive-classifier",
+    driftFromPhase2Mode: true,
+  });
+
+  const observability = controller.describeObservability();
+  assert.equal(observability.summary.totalAdaptivePlacements, 1);
+  assert.equal(observability.summary.totalAdaptivePlacementDrifts, 1);
+  assert.equal(observability.operatorConfig.adaptivePlacementEnabled, true);
+  assert.equal(observability.operatorConfig.adaptivePlacementClientAllowlistSize, 0);
+  assert.ok(
+    observability.recentEvents.some(
+      (event) =>
+        event.eventType === "adaptive.placement.applied" &&
+        event.runtimeMode === "stateless" &&
+        event.phase2RuntimeMode === "sticky",
+    ),
+  );
+});
+
+test("adaptive placement preserves explicit runtimeMode overrides", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-explicit",
+    params: {
+      clientId: "adaptive-explicit-test",
+      runtimeMode: "sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "stateless");
+  assert.deepEqual(initialized.runtimeRecommendation.adaptivePlacement, {
+    enabled: true,
+    applied: false,
+    source: "explicit-runtime-mode",
+    runtimeModeSource: "explicit",
+    driftFromPhase2Mode: false,
+  });
+  assert.equal(controller.describeObservability().summary.totalAdaptivePlacements, 0);
+});
+
+test("adaptive placement does not flip existing sessions mid-lifecycle", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-existing",
+    params: { clientId: "adaptive-existing-test" },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+
+  const echoed = await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: {
+      message: "keep existing mode",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(echoed.runtimeMode, "sticky");
+  assert.equal(echoed.serverInstanceId, initialized.serverInstanceId);
+  assert.equal(echoed.reusedExistingSession, true);
+  assert.equal(echoed.runtimeRecommendation.recommendedMode, "stateless");
+  assert.deepEqual(echoed.runtimeRecommendation.adaptivePlacement, {
+    enabled: true,
+    applied: false,
+    source: "existing-session-mode",
+    runtimeModeSource: "existing-session",
+    driftFromPhase2Mode: false,
+  });
+});
+
+test("adaptive placement can be rolled back without recreating the controller", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  const adaptive = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-before-rollback",
+    params: {
+      clientId: "adaptive-rollback-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(adaptive.runtimeMode, "stateless");
+  assert.equal(controller.setAdaptivePlacementEnabled(false), false);
+
+  const reverted = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-after-rollback",
+    params: {
+      clientId: "adaptive-rollback-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(reverted.runtimeMode, "sticky");
+  assert.equal(reverted.runtimeRecommendation.recommendedMode, "stateless");
+  assert.equal(reverted.runtimeRecommendation.automaticPlacement, false);
+  assert.equal(controller.describeRegistry().adaptivePlacementEnabled, false);
+});
+
 test("gateway controller treats malformed runtime hints as diagnostics only", async () => {
   const controller = createHttpSseGatewayController();
 
@@ -669,6 +835,192 @@ test("startup security audit rejects unexpected self-hijack probe failures", asy
       }),
     /Startup self-hijack probe did not receive an unauthorized failure/,
   );
+});
+
+test("gateway controller respects adaptive placement allowlist for canary clients", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+      { serverInstanceId: "server-b", load: 0.9 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+      adaptivePlacementClientAllowlist: ["client-a"],
+    },
+  });
+
+  const initializedCanary = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "client-a" },
+  });
+
+  assert.equal(initializedCanary.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "adaptive-classifier");
+
+  const initializedNonCanary = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "client-b" },
+  });
+
+  assert.equal(initializedNonCanary.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "canary-not-allowed");
+});
+
+test("gateway controller tracks runtimeModeSource in lifecycle metadata", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+      adaptivePlacementClientAllowlist: [],
+    },
+  });
+
+  const result = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "test-client" },
+  });
+
+  const sessionRecord = await controller.sessionRegistry.get(result.sessionId);
+  assert.equal(sessionRecord.metadata.runtimeModeSource, "adaptive-classifier");
+});
+
+test("gateway controller uses explicit runtimeModeSource when mode is explicit", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+    },
+  });
+
+  const result = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: {
+      clientId: "test-client",
+      runtimeMode: "stateless",
+    },
+  });
+
+  assert.equal(result.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "explicit");
+
+  const sessionRecord = await controller.sessionRegistry.get(result.sessionId);
+  assert.equal(sessionRecord.metadata.runtimeModeSource, "explicit");
+});
+
+test("gateway controller updates runtimeModeSource when an existing session receives an explicit override", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: {
+      clientId: "test-client",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "adaptive-classifier");
+
+  const overridden = await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: {
+      message: "switch explicitly",
+      runtimeMode: "sticky",
+    },
+  });
+
+  assert.equal(overridden.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "explicit");
+
+  const sessionRecord = await controller.sessionRegistry.get(initialized.sessionId);
+  assert.equal(sessionRecord.metadata.runtimeModeSource, "explicit");
+  assert.equal(sessionRecord.metadata.runtimeMode, "sticky");
+});
+
+test("gateway controller uses existing-session runtimeModeSource on reconnect", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "test-client" },
+  });
+
+  const reconnected = await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: { message: "test" },
+  });
+
+  assert.equal(reconnected.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "existing-session");
+
+  const sessionRecord = await controller.sessionRegistry.get(initialized.sessionId);
+  assert.equal(sessionRecord.metadata.runtimeModeSource, "adaptive-classifier");
+});
+
+test("gateway controller reports phase-2-default when adaptive placement is disabled", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: false,
+    },
+  });
+
+  const result = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "test-client" },
+  });
+
+  assert.equal(result.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "phase-2-default");
+});
+
+test("gateway controller setAdaptivePlacementClientAllowlist updates allowlist", async () => {
+  const controller = createHttpSseGatewayController({
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1 },
+      { serverInstanceId: "server-b", load: 0.9 },
+    ],
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+      adaptivePlacementClientAllowlist: ["client-a"],
+    },
+  });
+
+  const beforeUpdate = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "client-b" },
+  });
+  assert.equal(beforeUpdate.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "canary-not-allowed");
+
+  assert.deepEqual(controller.setAdaptivePlacementClientAllowlist(["client-a", "client-b"]), [
+    "client-a",
+    "client-b",
+  ]);
+
+  const afterUpdate = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: { clientId: "client-b" },
+  });
+  assert.equal(afterUpdate.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "adaptive-classifier");
 });
 
 function createEventCollector() {

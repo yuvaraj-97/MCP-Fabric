@@ -438,10 +438,12 @@ This phase is successful if:
 
 If the real-world validation succeeds, the next build steps should be:
 
-1. package the gateway as a clearer standalone runtime
-2. add stronger operator observability and structured logs
-3. support external shared state backends beyond local files
-4. document deployment alternatives such as ALB/NGINX versus the custom
+1. complete the Phase 2 validation and production gates in
+   [`phase-2-validation-production-gates.md`](./phase-2-validation-production-gates.md)
+2. package the gateway as a clearer standalone runtime
+3. add stronger operator observability and structured logs
+4. support external shared state backends beyond local files
+5. document deployment alternatives such as ALB/NGINX versus the custom
    gateway path
 
 ## Longer-Term Future Work

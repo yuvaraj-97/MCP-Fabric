@@ -13,6 +13,8 @@ export const DEFAULT_GATEWAY_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryFilePath: undefined,
   sessionRegistryRedisKey: "mcp:gateway:sessions",
   sessionRegistryRedisUrl: undefined,
+  adaptivePlacementEnabled: false,
+  adaptivePlacementClientAllowlist: [],
 });
 
 export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
@@ -30,6 +32,8 @@ export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryFilePath: undefined,
   sessionRegistryRedisKey: "mcp:gateway:sessions",
   sessionRegistryRedisUrl: undefined,
+  adaptivePlacementEnabled: false,
+  adaptivePlacementClientAllowlist: [],
 });
 
 const ALLOWED_ON_DISCONNECT_VALUES = new Set(["cancel", "queue"]);
@@ -60,10 +64,19 @@ export function resolveOperatorConfig({
       config.sessionRegistryRedisKey ?? defaults.sessionRegistryRedisKey,
     sessionRegistryRedisUrl:
       config.sessionRegistryRedisUrl ?? defaults.sessionRegistryRedisUrl,
+    adaptivePlacementEnabled:
+      config.adaptivePlacementEnabled ?? defaults.adaptivePlacementEnabled,
+    adaptivePlacementClientAllowlist:
+      config.adaptivePlacementClientAllowlist ?? defaults.adaptivePlacementClientAllowlist,
   };
 
   validateOperatorConfig(resolved);
-  return Object.freeze({ ...resolved });
+  return Object.freeze({
+    ...resolved,
+    adaptivePlacementClientAllowlist: Object.freeze([
+      ...resolved.adaptivePlacementClientAllowlist,
+    ]),
+  });
 }
 
 export function operatorConfigFromEnv({
@@ -112,6 +125,14 @@ export function operatorConfigFromEnv({
         env.MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL ??
         env.MCP_OPERATOR_SESSION_REGISTRY_REDIS_URL ??
         env.REDIS_URL,
+      adaptivePlacementEnabled: parseOptionalBoolean(
+        env.MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED ??
+          env.MCP_OPERATOR_ADAPTIVE_PLACEMENT_ENABLED,
+      ),
+      adaptivePlacementClientAllowlist: parseClientAllowlist(
+        env.MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST ??
+          env.MCP_OPERATOR_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST,
+      ),
     },
   });
 }
@@ -194,6 +215,43 @@ function validateOperatorConfig(config) {
   ) {
     throw new TypeError("sessionRegistryRedisUrl must be a non-empty string when provided");
   }
+
+  if (typeof config.adaptivePlacementEnabled !== "boolean") {
+    throw new TypeError("adaptivePlacementEnabled must be a boolean");
+  }
+
+  if (!Array.isArray(config.adaptivePlacementClientAllowlist)) {
+    throw new TypeError("adaptivePlacementClientAllowlist must be an array");
+  }
+
+  for (const clientId of config.adaptivePlacementClientAllowlist) {
+    if (typeof clientId !== "string" || clientId.trim().length === 0) {
+      throw new TypeError("adaptivePlacementClientAllowlist items must be non-empty strings");
+    }
+  }
+}
+
+function parseClientAllowlist(value) {
+  if (value === undefined || value === null || value === "") {
+    return [];
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError("adaptivePlacementClientAllowlist must be a string or undefined");
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return [];
+  }
+
+  return trimmed.split(",").map((id) => {
+    const cleaned = id.trim();
+    if (!cleaned) {
+      throw new TypeError("adaptivePlacementClientAllowlist contains empty client ID");
+    }
+    return cleaned;
+  });
 }
 
 function parseOptionalNumber(value) {

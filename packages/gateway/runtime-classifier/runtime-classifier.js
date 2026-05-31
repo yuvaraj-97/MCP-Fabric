@@ -3,6 +3,7 @@ import { RUNTIME_MODES, normalizeRuntimeMode } from "../load-balancer/load-route
 const DEFAULT_TRANSPORT = "unknown";
 const LONG_DURATION_MS = 30_000;
 const EXPENSIVE_INITIALIZATION_MS = 5_000;
+const HIGH_WORKER_LOAD = 0.8;
 
 export function analyzeRuntimeAffinity({
   explicitRuntimeMode,
@@ -97,6 +98,13 @@ export function normalizeRuntimeHints(runtimeHints = {}) {
       name: "initializationCostMs",
       value: runtimeHints.initializationCostMs,
     }),
+    workerLoad: normalizeOptionalLoad({
+      invalidHints,
+      name: "workerLoad",
+      value: runtimeHints.workerLoad,
+    }),
+    workerHealthy:
+      typeof runtimeHints.workerHealthy === "boolean" ? runtimeHints.workerHealthy : null,
     invalidHints,
   };
 }
@@ -168,6 +176,23 @@ function scoreStickyTendency({ hints, method, reasons, transport }) {
       code: "expensive-initialization",
       message: "Expensive initialization favors preserving runtime affinity.",
       weight: 2,
+    });
+  }
+
+  if (hints.workerHealthy === false) {
+    reasons.push({
+      code: "worker-unhealthy",
+      message: "Worker health telemetry is unhealthy; keep this as diagnostics until placement is adaptive.",
+      weight: 0,
+    });
+  }
+
+  if (typeof hints.workerLoad === "number" && hints.workerLoad >= HIGH_WORKER_LOAD) {
+    reasons.push({
+      code: "worker-load-high",
+      message: "Worker load telemetry is high; Phase 2 records this without changing placement.",
+      weight: 0,
+      load: hints.workerLoad,
     });
   }
 
@@ -275,6 +300,19 @@ function normalizeOptionalNonNegativeNumber({ invalidHints, name, value }) {
   }
 
   if (typeof value !== "number" || value < 0 || !Number.isFinite(value)) {
+    invalidHints.push(name);
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeOptionalLoad({ invalidHints, name, value }) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "number" || value < 0 || value > 1 || !Number.isFinite(value)) {
     invalidHints.push(name);
     return null;
   }

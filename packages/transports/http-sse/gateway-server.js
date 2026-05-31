@@ -254,6 +254,8 @@ export function createHttpSseGatewayController({
     allowPublicBind: effectiveAllowPublicBind,
     enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
   } = resolvedOperatorConfig;
+  let adaptivePlacementEnabled = resolvedOperatorConfig.adaptivePlacementEnabled;
+  let adaptivePlacementClientAllowlist = resolvedOperatorConfig.adaptivePlacementClientAllowlist;
   const resolvedSessionRegistry =
     sessionRegistry ??
     createSessionRegistry({
@@ -303,6 +305,7 @@ export function createHttpSseGatewayController({
         host: effectiveHost,
         allowPublicBind: effectiveAllowPublicBind,
         enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
+        adaptivePlacementEnabled,
         filePath:
           typeof resolvedSessionRegistry.filePath === "function"
             ? resolvedSessionRegistry.filePath()
@@ -316,9 +319,38 @@ export function createHttpSseGatewayController({
     },
     describeObservability() {
       return {
+        operatorConfig: {
+          adaptivePlacementEnabled,
+          adaptivePlacementClientAllowlistSize: adaptivePlacementClientAllowlist.length,
+        },
         summary: observer.summary(),
         recentEvents: observer.listEvents(),
       };
+    },
+    setAdaptivePlacementEnabled(enabled) {
+      if (typeof enabled !== "boolean") {
+        throw new TypeError("adaptivePlacementEnabled must be a boolean");
+      }
+      adaptivePlacementEnabled = enabled;
+      observer.record("adaptive.placement.flag.updated", {
+        adaptivePlacementEnabled,
+      });
+      return adaptivePlacementEnabled;
+    },
+    setAdaptivePlacementClientAllowlist(allowlist) {
+      if (!Array.isArray(allowlist)) {
+        throw new TypeError("adaptivePlacementClientAllowlist must be an array");
+      }
+      for (const clientId of allowlist) {
+        if (typeof clientId !== "string" || clientId.trim().length === 0) {
+          throw new TypeError("adaptivePlacementClientAllowlist items must be non-empty strings");
+        }
+      }
+      adaptivePlacementClientAllowlist = [...allowlist];
+      observer.record("adaptive.placement.allowlist.updated", {
+        allowlistSize: adaptivePlacementClientAllowlist.length,
+      });
+      return [...adaptivePlacementClientAllowlist];
     },
     upsertInstance(instance) {
       const updated = router.upsertInstance(instance);
@@ -406,181 +438,233 @@ export function createHttpSseGatewayController({
       });
     },
     async handleGatewayMessage(body) {
-      await resolvedSessionRegistry.pruneExpired?.();
-      await pruneQueuedDisconnectEvents({
-        queuedDisconnectEvents,
-        sessionRegistry: resolvedSessionRegistry,
-      });
       const method = body.method;
       const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
-      const existingSessionRecord = sessionId
-        ? await resolvedSessionRegistry.get(sessionId)
-        : undefined;
-      const runtimeMode = resolveRuntimeMode({
-        body,
-        existingSessionRecord,
-      });
-      const runtimeRecommendation = resolveRuntimeRecommendation({
-        body,
-        existingSessionRecord,
-        method,
-        runtimeMode,
-      });
-      const requestNow = now();
-      observer.record("request.received", {
-        method,
-        sessionId,
-        existingSessionRecord: Boolean(existingSessionRecord),
-        runtimeMode,
-        runtimeRecommendation,
-      });
-      observer.record("runtime.recommendation", {
-        method,
-        sessionId,
-        runtimeMode,
-        runtimeRecommendation,
-      });
-
-      if (method !== "initialize" && !existingSessionRecord) {
-        observer.record("request.rejected", {
+      try {
+        await resolvedSessionRegistry.pruneExpired?.();
+        await pruneQueuedDisconnectEvents({
+          queuedDisconnectEvents,
+          sessionRegistry: resolvedSessionRegistry,
+        });
+        const existingSessionRecord = sessionId
+          ? await resolvedSessionRegistry.get(sessionId)
+          : undefined;
+        const phase2RuntimeMode = resolveRuntimeMode({
+          body,
+          existingSessionRecord,
+        });
+        const baseRuntimeRecommendation = resolveRuntimeRecommendation({
+          body,
+          existingSessionRecord,
+          method,
+          runtimeMode: phase2RuntimeMode,
+        });
+        const clientId = body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client";
+        const explicitRuntimeMode = body.runtimeMode ?? body.params?.runtimeMode;
+        const placement = resolvePlacementRuntimeMode({
+          adaptivePlacementEnabled,
+          adaptivePlacementClientAllowlist,
+          clientId,
+          existingSessionRecord,
+          explicitRuntimeMode,
+          phase2RuntimeMode,
+          runtimeRecommendation: baseRuntimeRecommendation,
+        });
+        const runtimeMode = placement.runtimeMode;
+        const runtimeRecommendation = {
+          ...baseRuntimeRecommendation,
+          phase: adaptivePlacementEnabled ? "adaptive-placement" : baseRuntimeRecommendation.phase,
+          automaticPlacement: adaptivePlacementEnabled,
+          effectiveRuntimeMode: runtimeMode,
+          adaptivePlacement: {
+            enabled: adaptivePlacementEnabled,
+            applied: placement.applied,
+            source: placement.source,
+            runtimeModeSource: placement.runtimeModeSource,
+            driftFromPhase2Mode: placement.driftFromPhase2Mode,
+          },
+        };
+        const requestNow = now();
+        observer.record("request.received", {
           method,
           sessionId,
-          code: "session-not-found",
+          existingSessionRecord: Boolean(existingSessionRecord),
+          runtimeMode,
+          runtimeRecommendation,
         });
-        throw createGatewaySessionError({
-          sessionId,
-          code: "session-not-found",
-          statusCode: 410,
-          message: "Session was not found or has expired. Reinitialize the MCP session.",
-        });
-      }
-
-      const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
-      if (method !== "initialize" && reconnectState === "grace-expired") {
-        await resolvedSessionRegistry.delete(sessionId);
-        queuedDisconnectEvents.delete(sessionId);
-        observer.record("request.rejected", {
+        observer.record("runtime.recommendation", {
           method,
           sessionId,
-          code: "reconnect-grace-expired",
+          runtimeMode,
+          runtimeRecommendation,
         });
-        throw createGatewaySessionError({
+        if (placement.applied) {
+          observer.record("adaptive.placement.applied", {
+            method,
+            sessionId,
+            phase2RuntimeMode,
+            runtimeMode,
+            recommendedMode: runtimeRecommendation.recommendedMode,
+            driftFromPhase2Mode: placement.driftFromPhase2Mode,
+            source: placement.source,
+          });
+        }
+
+        if (method !== "initialize" && !existingSessionRecord) {
+          observer.record("request.rejected", {
+            method,
+            sessionId,
+            code: "session-not-found",
+          });
+          throw createGatewaySessionError({
+            sessionId,
+            code: "session-not-found",
+            statusCode: 410,
+            message: "Session was not found or has expired. Reinitialize the MCP session.",
+          });
+        }
+
+        const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
+        if (method !== "initialize" && reconnectState === "grace-expired") {
+          await resolvedSessionRegistry.delete(sessionId);
+          queuedDisconnectEvents.delete(sessionId);
+          observer.record("request.rejected", {
+            method,
+            sessionId,
+            code: "reconnect-grace-expired",
+          });
+          throw createGatewaySessionError({
+            sessionId,
+            code: "reconnect-grace-expired",
+            statusCode: 410,
+            message: "Reconnect grace period expired. Reinitialize the MCP session.",
+          });
+        }
+
+        const route = await router.routeSession(sessionId, { runtimeMode });
+        const lifecycleMetadata = buildLifecycleMetadata({
+          existingRecord: existingSessionRecord,
+          clientId,
+          now: requestNow,
+          runtimeMode,
+          runtimeModeSource:
+            explicitRuntimeMode !== undefined
+              ? placement.runtimeModeSource
+              : (existingSessionRecord?.metadata?.runtimeModeSource ?? placement.runtimeModeSource),
+          sessionTtlMs: effectiveSessionTtlMs,
+        });
+        await resolvedSessionRegistry.assign(
           sessionId,
-          code: "reconnect-grace-expired",
-          statusCode: 410,
-          message: "Reconnect grace period expired. Reinitialize the MCP session.",
+          route.serverInstanceId,
+          lifecycleMetadata,
+        );
+        const application = applications.get(route.serverInstanceId);
+        let recoveryAction = determineRecoveryAction({
+          method,
+          route,
+          existingSessionRecord,
+          application,
+          sessionId,
+          reconnectState,
         });
-      }
 
-      const route = await router.routeSession(sessionId, { runtimeMode });
-      const lifecycleMetadata = buildLifecycleMetadata({
-        existingRecord: existingSessionRecord,
-        clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
-        now: requestNow,
-        runtimeMode,
-        sessionTtlMs: effectiveSessionTtlMs,
-      });
-      await resolvedSessionRegistry.assign(
-        sessionId,
-        route.serverInstanceId,
-        lifecycleMetadata,
-      );
-      const application = applications.get(route.serverInstanceId);
-      let recoveryAction = determineRecoveryAction({
-        method,
-        route,
-        existingSessionRecord,
-        application,
-        sessionId,
-        reconnectState,
-      });
+        if (method !== "initialize" && !application.getSessionState(sessionId)) {
+          const rehydrated = await application.handleMessage(
+            {
+              jsonrpc: "2.0",
+              id: `${sessionId}:rehydrate`,
+              method: "initialize",
+              params: {
+                clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+              },
+              sessionId,
+            },
+            createGatewayContext({
+              sessionId,
+              route,
+              reusedExistingSession: false,
+              eventStreams,
+            }),
+          );
+          assertGatewayResult(rehydrated);
+          recoveryAction = route.reusedExistingSession
+            ? reconnectState === "within-grace"
+              ? "reconnected-from-registry-within-grace"
+              : "reconnected-from-registry"
+            : reconnectState === "within-grace"
+              ? "reassigned-and-rehydrated-within-grace"
+              : "reassigned-and-rehydrated";
+          publishEvent(eventStreams, sessionId, "session.rehydrated", {
+            sessionId,
+            serverInstanceId: route.serverInstanceId,
+            clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+            observedAt: new Date().toISOString(),
+          });
+          observer.record("session.rehydrated", {
+            sessionId,
+            serverInstanceId: route.serverInstanceId,
+            recoveryAction,
+          });
+        }
 
-      if (method !== "initialize" && !application.getSessionState(sessionId)) {
-        const rehydrated = await application.handleMessage(
+        const envelope = await application.handleMessage(
           {
             jsonrpc: "2.0",
-            id: `${sessionId}:rehydrate`,
-            method: "initialize",
-            params: {
-              clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
-            },
+            id: body.id ?? `${sessionId}:${method}`,
+            method,
+            params: body.params,
             sessionId,
           },
           createGatewayContext({
             sessionId,
             route,
-            reusedExistingSession: false,
+            reusedExistingSession: route.reusedExistingSession,
             eventStreams,
-            }),
+          }),
         );
-        assertGatewayResult(rehydrated);
-        recoveryAction = route.reusedExistingSession
-          ? reconnectState === "within-grace"
-            ? "reconnected-from-registry-within-grace"
-            : "reconnected-from-registry"
-          : reconnectState === "within-grace"
-            ? "reassigned-and-rehydrated-within-grace"
-            : "reassigned-and-rehydrated";
-        publishEvent(eventStreams, sessionId, "session.rehydrated", {
+        const result = assertGatewayResult(envelope);
+
+        publishEvent(eventStreams, sessionId, "route.selected", {
           sessionId,
           serverInstanceId: route.serverInstanceId,
-          clientId: existingSessionRecord?.metadata?.clientId ?? "gateway-rehydrated-client",
+          reusedExistingSession: route.reusedExistingSession,
+          runtimeMode: route.runtimeMode,
           observedAt: new Date().toISOString(),
         });
-        observer.record("session.rehydrated", {
+        observer.record("route.completed", {
+          method,
           sessionId,
           serverInstanceId: route.serverInstanceId,
-          recoveryAction,
-        });
-      }
-
-      const envelope = await application.handleMessage(
-        {
-          jsonrpc: "2.0",
-          id: body.id ?? `${sessionId}:${method}`,
-          method,
-          params: body.params,
-          sessionId,
-        },
-        createGatewayContext({
-          sessionId,
-          route,
           reusedExistingSession: route.reusedExistingSession,
-          eventStreams,
-        }),
-      );
-      const result = assertGatewayResult(envelope);
+          recoveryAction,
+          runtimeMode: route.runtimeMode,
+          runtimeRecommendation,
+        });
 
-      publishEvent(eventStreams, sessionId, "route.selected", {
-        sessionId,
-        serverInstanceId: route.serverInstanceId,
-        reusedExistingSession: route.reusedExistingSession,
-        runtimeMode: route.runtimeMode,
-        observedAt: new Date().toISOString(),
-      });
-      observer.record("route.completed", {
-        method,
-        sessionId,
-        serverInstanceId: route.serverInstanceId,
-        reusedExistingSession: route.reusedExistingSession,
-        recoveryAction,
-        runtimeMode: route.runtimeMode,
-        runtimeRecommendation,
-      });
-
-      return {
-        sessionId,
-        serverInstanceId: route.serverInstanceId,
-        reusedExistingSession: route.reusedExistingSession,
-        runtimeMode: route.runtimeMode,
-        runtimeRecommendation,
-        recovery: {
-          action: recoveryAction,
-          registry: this.describeRegistry(),
-          registryRecordFound: Boolean(existingSessionRecord),
-        },
-        result,
-      };
+        return {
+          sessionId,
+          serverInstanceId: route.serverInstanceId,
+          reusedExistingSession: route.reusedExistingSession,
+          runtimeMode: route.runtimeMode,
+          runtimeRecommendation,
+          recovery: {
+            action: recoveryAction,
+            registry: this.describeRegistry(),
+            registryRecordFound: Boolean(existingSessionRecord),
+          },
+          result,
+        };
+      } catch (error) {
+        if (error?.code !== "session-not-found" && error?.code !== "reconnect-grace-expired") {
+          observer.record("request.failed", {
+            method,
+            sessionId: sessionId ?? null,
+            code: error?.code ?? "gateway-request-failed",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        throw error;
+      }
     },
     listPublishedEvents(sessionId) {
       return Array.from(eventStreams.get(sessionId) ?? []);
@@ -777,10 +861,11 @@ function deriveReconnectState(existingSessionRecord, requestNow) {
   return "grace-expired";
 }
 
-function buildLifecycleMetadata({ existingRecord, clientId, now, runtimeMode, sessionTtlMs }) {
+function buildLifecycleMetadata({ existingRecord, clientId, now, runtimeMode, runtimeModeSource, sessionTtlMs }) {
   return {
     clientId,
     runtimeMode,
+    runtimeModeSource,
     connectionState: "active",
     disconnectedAt: null,
     graceUntil: null,
@@ -851,6 +936,77 @@ function resolveRuntimeRecommendation({ body, existingSessionRecord, method, run
       explicitOverride: false,
     };
   }
+}
+
+function resolvePlacementRuntimeMode({
+  adaptivePlacementEnabled,
+  adaptivePlacementClientAllowlist,
+  clientId,
+  existingSessionRecord,
+  explicitRuntimeMode,
+  phase2RuntimeMode,
+  runtimeRecommendation,
+}) {
+  if (!adaptivePlacementEnabled) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "phase-2-routing",
+      runtimeModeSource: "phase-2-default",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  if (explicitRuntimeMode !== undefined) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "explicit-runtime-mode",
+      runtimeModeSource: "explicit",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  if (existingSessionRecord) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "existing-session-mode",
+      runtimeModeSource: "existing-session",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  if (adaptivePlacementClientAllowlist.length > 0 && !adaptivePlacementClientAllowlist.includes(clientId)) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "canary-client-not-allowed",
+      runtimeModeSource: "canary-not-allowed",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  let recommendedMode;
+  try {
+    recommendedMode = normalizeRuntimeMode(runtimeRecommendation.recommendedMode);
+  } catch {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "invalid-classifier-recommendation",
+      runtimeModeSource: "invalid-classifier-recommendation",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  return {
+    runtimeMode: recommendedMode,
+    applied: true,
+    source: "classifier-recommendation",
+    runtimeModeSource: "adaptive-classifier",
+    driftFromPhase2Mode: recommendedMode !== phase2RuntimeMode,
+  };
 }
 
 function applyDisconnectPolicy({

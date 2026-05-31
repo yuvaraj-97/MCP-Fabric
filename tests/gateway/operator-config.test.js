@@ -24,6 +24,7 @@ test("operator config parses valid environment overrides", () => {
       MCP_GATEWAY_LOAD_THRESHOLD: "0.75",
       MCP_GATEWAY_SESSION_TTL_MS: "90000",
       MCP_GATEWAY_RECONNECT_GRACE_MS: "12000",
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: "1",
     },
   });
 
@@ -39,6 +40,7 @@ test("operator config parses valid environment overrides", () => {
   assert.equal(config.enforceStartupSecurityAudit, true);
   assert.equal(config.sessionRegistryBackend, "file");
   assert.equal(config.sessionRegistryRedisKey, "mcp:gateway:sessions");
+  assert.equal(config.adaptivePlacementEnabled, true);
 });
 
 test("operator config parses a valid disconnect policy override", () => {
@@ -137,6 +139,14 @@ test("operator config rejects non-positive lifecycle and fleet values", () => {
   assert.throws(
     () =>
       operatorConfigFromEnv({
+        env: { MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: "maybe" },
+      }),
+    /Expected a boolean environment value/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
         env: { MCP_GATEWAY_SESSION_REGISTRY_BACKEND: "database" },
       }),
     /sessionRegistryBackend must be one of: "memory", "file", "redis"/,
@@ -173,4 +183,59 @@ test("demo server instance generation honors configured server count", () => {
   assert.equal(instances.length, 4);
   assert.equal(instances[0].serverInstanceId, "server-a");
   assert.equal(instances[3].serverInstanceId, "server-d");
+});
+
+test("operator config parses adaptive placement client allowlist from environment", () => {
+  const config = operatorConfigFromEnv({
+    env: {
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: "client-1, client-2, client-3",
+    },
+  });
+
+  assert.deepEqual(config.adaptivePlacementClientAllowlist, ["client-1", "client-2", "client-3"]);
+});
+
+test("operator config parses alternative env var for adaptive placement client allowlist", () => {
+  const config = operatorConfigFromEnv({
+    env: {
+      MCP_OPERATOR_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: "app-a,app-b",
+    },
+  });
+
+  assert.deepEqual(config.adaptivePlacementClientAllowlist, ["app-a", "app-b"]);
+});
+
+test("operator config returns empty allowlist when env var is empty", () => {
+  const config = operatorConfigFromEnv({
+    env: {
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: "  ",
+    },
+  });
+
+  assert.deepEqual(config.adaptivePlacementClientAllowlist, []);
+});
+
+test("operator config rejects invalid adaptive placement client allowlist", () => {
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: {
+          MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: "client-1,,client-2",
+        },
+      }),
+    /adaptivePlacementClientAllowlist contains empty client ID/,
+  );
+});
+
+test("operator config preserves explicit allowlist in resolve", () => {
+  const config = resolveOperatorConfig({
+    config: {
+      adaptivePlacementClientAllowlist: ["explicit-client-1", "explicit-client-2"],
+    },
+  });
+
+  assert.deepEqual(config.adaptivePlacementClientAllowlist, [
+    "explicit-client-1",
+    "explicit-client-2",
+  ]);
 });

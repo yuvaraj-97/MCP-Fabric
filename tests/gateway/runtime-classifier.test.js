@@ -67,6 +67,7 @@ test("classifier treats malformed runtime hints as ignored diagnostics", () => {
     runtimeHints: {
       resourceHandles: ["browser", 42],
       runtimeDurationMs: -1,
+      workerLoad: 2,
     },
   });
 
@@ -74,10 +75,34 @@ test("classifier treats malformed runtime hints as ignored diagnostics", () => {
   assert.deepEqual(recommendation.signals.invalidHints, [
     "resourceHandles",
     "runtimeDurationMs",
+    "workerLoad",
   ]);
   assert.ok(
     recommendation.reasons.some((reason) => reason.code === "invalid-runtime-hints-ignored"),
   );
+});
+
+test("classifier records worker health and load telemetry without changing placement", () => {
+  const recommendation = analyzeRuntimeAffinity({
+    explicitRuntimeMode: "sticky",
+    method: "tools/call",
+    runtimeHints: {
+      replaySafe: true,
+      readOnly: true,
+      externalState: true,
+      workerHealthy: false,
+      workerLoad: 0.95,
+    },
+    transport: "http-sse",
+  });
+
+  assert.equal(recommendation.recommendedMode, "stateless");
+  assert.equal(recommendation.effectiveRuntimeMode, "sticky");
+  assert.equal(recommendation.automaticPlacement, false);
+  assert.equal(recommendation.signals.workerHealthy, false);
+  assert.equal(recommendation.signals.workerLoad, 0.95);
+  assert.ok(recommendation.reasons.some((reason) => reason.code === "worker-unhealthy"));
+  assert.ok(recommendation.reasons.some((reason) => reason.code === "worker-load-high"));
 });
 
 test("classifier defaults conservatively to sticky with low confidence", () => {
