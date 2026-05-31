@@ -5,6 +5,8 @@ You are joining an existing project called MCP-Fabric.
 This document describes the long-term direction and audit workflow. The
 approved planning baseline for the next phase is recorded in
 [`docs/adaptive-runtime-fabric-decisions.md`](./adaptive-runtime-fabric-decisions.md).
+The multi-agent execution model for Codex, Claude, and Antigravity is recorded
+in [`docs/multi-agent-execution-plan.md`](./multi-agent-execution-plan.md).
 Use that decision record to interpret this vision conservatively:
 
 - keep the current gateway and transport infrastructure as the near-term

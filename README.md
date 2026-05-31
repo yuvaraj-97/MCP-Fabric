@@ -58,6 +58,7 @@ docs/
   design.md
   session-affinity.md
   load-balancing.md
+  multi-agent-execution-plan.md
   stdio-vs-http.md
   prototype-roadmap.md
   public-proposal.md
@@ -132,6 +133,9 @@ The concrete next-phase deployment proof is documented in
 The approved planning baseline for the adaptive runtime fabric direction is
 documented in
 [docs/adaptive-runtime-fabric-decisions.md](./docs/adaptive-runtime-fabric-decisions.md).
+The execution model for using Codex, Claude, and Antigravity together is
+documented in
+[docs/multi-agent-execution-plan.md](./docs/multi-agent-execution-plan.md).
 
 ## Operator Configuration
 
