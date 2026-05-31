@@ -22,6 +22,7 @@
     "validate:memory": "node validation/memory/run-validation.js",
     "validate:memory:multicontainer": "node validation/memory/run-multicontainer-proof.js",
     "validate:shared-redis": "node validation/shared-redis/run-proof.js",
+    "validate:burst-memory": "node --expose-gc validation/burst-memory/run-proof.js",
     "check": "npm test"
   },
   "engines": {

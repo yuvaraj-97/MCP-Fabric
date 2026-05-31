@@ -24,6 +24,10 @@ node --test tests/failover/http-sse-gateway-controller.test.js tests/failover/ht
 ```
 
 ```sh
+node --test tests/failover/redis-outage.test.js
+```
+
+```sh
 npm run check
 npm test
 ```
@@ -43,6 +47,12 @@ Remote-process and shared-backend proofs:
 npm run validate:filesystem:multicontainer
 npm run validate:git:multicontainer
 npm run validate:memory:multicontainer
+```
+
+Burst session creation proof:
+
+```sh
+npm run validate:burst-memory
 ```
 
 Shared Redis proof against an already-running topology:
@@ -89,19 +99,75 @@ Alert-worthy conditions:
 
 Before Phase 3 adaptive placement can begin:
 
-- [ ] Full unit and integration test suite is green.
-- [ ] Filesystem, git, and memory validations pass through gateway paths.
-- [ ] Redis-backed multi-gateway proof passes in an environment with Redis and
+- [x] Full unit and integration test suite is green.
+- [x] Filesystem, git, and memory validations pass through gateway paths.
+- [x] Redis-backed multi-gateway proof passes in an environment with Redis and
       local listener support.
-- [ ] Redis outage behavior is tested and documented.
-- [ ] Burst session creation is tested for bounded memory behavior.
-- [ ] Recommendation drift is visible in `/observability`.
-- [ ] Malformed classifier hints are surfaced as diagnostics, not request
+- [x] Redis outage behavior is tested and documented.
+- [x] Burst session creation is tested for bounded memory behavior.
+- [x] Recommendation drift is visible in `/observability`.
+- [x] Malformed classifier hints are surfaced as diagnostics, not request
       failures.
-- [ ] Classifier diagnostic failures preserve routing and are observable.
-- [ ] Canary and rollback guidance exists for any future adaptive placement
+- [x] Classifier diagnostic failures preserve routing and are observable.
+- [x] Canary and rollback guidance exists for any future adaptive placement
       flag.
-- [ ] No Phase 3 code consumes `recommendedMode` as a routing input.
+- [x] No Phase 3 code consumes `recommendedMode` as a routing input.
+
+## Redis Outage Proof
+
+Redis outage behavior is covered by
+`node --test tests/failover/redis-outage.test.js`.
+
+The proof injects a Redis-backed registry failure during an HTTP/SSE
+`initialize` request and verifies:
+
+- the HTTP boundary returns a handled JSON error with status `503`;
+- the gateway process does not crash or emit an unhandled rejection;
+- `/observability` records `request.failed`;
+- `summary.totalErrors` increments.
+
+This is intentionally a fail-closed Phase 2 behavior. The gateway does not
+silently fall back to memory storage because that would split session affinity
+state across gateway processes during a Redis outage.
+
+## Burst Memory Proof
+
+Burst session creation is covered by `npm run validate:burst-memory`.
+
+The proof creates 5,000 gateway sessions with concurrency 100, expires the
+sessions by TTL, prunes the registry, and records heap/RSS before, during, and
+after the burst. The 2026-05-31 run produced:
+
+- active sessions after burst: `5000`;
+- pruned sessions after TTL: `5000`;
+- active sessions after prune: `0`;
+- peak heap growth: `20901680` bytes;
+- retained heap growth after prune and GC: `342384` bytes;
+- configured peak heap ceiling: `134217728` bytes;
+- configured retained heap ceiling: `50331648` bytes.
+
+The proof uses a minimal stateless application so the measurement isolates
+gateway/session-registry churn rather than application-owned session caches.
+
+## Phase 3 Canary And Rollback
+
+Any future adaptive placement implementation must use a separate operator flag
+that defaults off, for example `adaptivePlacementEnabled=false`.
+
+Required rollout sequence:
+
+- deploy with recommendation-only behavior still active;
+- enable adaptive placement for one non-critical workload or a small client
+  allowlist;
+- compare `recommendedMode`, `effectiveRuntimeMode`, rehydration events,
+  rejected requests, and `totalRuntimeOverrideWarnings`;
+- roll back immediately by disabling the adaptive placement flag if rejected
+  requests, rehydration failures, or registry errors increase;
+- keep explicit `runtimeMode` as an override during the canary.
+
+Rollback must not require a code deploy. Returning the flag to `false` must
+restore Phase 2 behavior where `recommendedMode` is observable but not used for
+routing.
 
 ## Operational Risks
 
@@ -130,20 +196,23 @@ Validated in this workspace on 2026-05-31:
 
 - `node --test tests/gateway/runtime-classifier.test.js`;
 - `node --test tests/failover/http-sse-gateway-controller.test.js tests/failover/http-sse-gateway.test.js`;
+- `node --test tests/failover/redis-outage.test.js`;
 - `npm run check`;
-- `npm test` and `npm run check` with 122 passing tests and 2 skipped sandbox-only
+- `npm test` and `npm run check` with 124 passing tests and 2 skipped sandbox-only
   remote-process tests;
 - `npm run validate:filesystem`;
 - `npm run validate:git`;
 - `npm run validate:memory`;
 - `npm run validate:filesystem:multicontainer`;
 - `npm run validate:git:multicontainer`;
-- `npm run validate:memory:multicontainer`.
+- `npm run validate:memory:multicontainer`;
 - `docker compose -f validation/shared-redis/compose.yaml up --abort-on-container-exit client`
   with `crossGatewayReuse`, `secondGatewayReadVisible`, and
-  `secondGatewayListVisible` all true.
+  `secondGatewayListVisible` all true;
+- `npm run validate:burst-memory` with 5,000 sessions, 5,000 TTL-pruned
+  records, peak heap growth of `20901680` bytes, and retained heap growth of
+  `342384` bytes under the configured ceilings.
 
-Still required before production horizontal-gateway claims:
-
-- Redis outage behavior proof;
-- burst-load memory behavior proof.
+No remaining Phase 2 production gates are open. Phase 3 adaptive placement is
+still a separate future implementation and must remain behind its own operator
+flag.
