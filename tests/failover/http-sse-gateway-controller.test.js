@@ -193,6 +193,168 @@ test("gateway controller returns recommendation-only classifier diagnostics", as
   );
 });
 
+test("adaptive placement uses classifier recommendation for new sessions when enabled", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-stateless",
+    params: {
+      clientId: "adaptive-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.phase, "adaptive-placement");
+  assert.equal(initialized.runtimeRecommendation.automaticPlacement, true);
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.effectiveRuntimeMode, "stateless");
+  assert.deepEqual(initialized.runtimeRecommendation.adaptivePlacement, {
+    enabled: true,
+    applied: true,
+    source: "classifier-recommendation",
+    driftFromPhase2Mode: true,
+  });
+
+  const observability = controller.describeObservability();
+  assert.equal(observability.summary.totalAdaptivePlacements, 1);
+  assert.equal(observability.summary.totalAdaptivePlacementDrifts, 1);
+  assert.equal(observability.operatorConfig.adaptivePlacementEnabled, true);
+  assert.ok(
+    observability.recentEvents.some(
+      (event) =>
+        event.eventType === "adaptive.placement.applied" &&
+        event.runtimeMode === "stateless" &&
+        event.phase2RuntimeMode === "sticky",
+    ),
+  );
+});
+
+test("adaptive placement preserves explicit runtimeMode overrides", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-explicit",
+    params: {
+      clientId: "adaptive-explicit-test",
+      runtimeMode: "sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+  assert.equal(initialized.runtimeRecommendation.recommendedMode, "stateless");
+  assert.deepEqual(initialized.runtimeRecommendation.adaptivePlacement, {
+    enabled: true,
+    applied: false,
+    source: "explicit-runtime-mode",
+    driftFromPhase2Mode: false,
+  });
+  assert.equal(controller.describeObservability().summary.totalAdaptivePlacements, 0);
+});
+
+test("adaptive placement does not flip existing sessions mid-lifecycle", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-existing",
+    params: { clientId: "adaptive-existing-test" },
+  });
+
+  assert.equal(initialized.runtimeMode, "sticky");
+
+  const echoed = await controller.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: {
+      message: "keep existing mode",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(echoed.runtimeMode, "sticky");
+  assert.equal(echoed.serverInstanceId, initialized.serverInstanceId);
+  assert.equal(echoed.reusedExistingSession, true);
+  assert.equal(echoed.runtimeRecommendation.recommendedMode, "stateless");
+  assert.deepEqual(echoed.runtimeRecommendation.adaptivePlacement, {
+    enabled: true,
+    applied: false,
+    source: "existing-session-mode",
+    driftFromPhase2Mode: false,
+  });
+});
+
+test("adaptive placement can be rolled back without recreating the controller", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  const adaptive = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-before-rollback",
+    params: {
+      clientId: "adaptive-rollback-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(adaptive.runtimeMode, "stateless");
+  assert.equal(controller.setAdaptivePlacementEnabled(false), false);
+
+  const reverted = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-after-rollback",
+    params: {
+      clientId: "adaptive-rollback-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(reverted.runtimeMode, "sticky");
+  assert.equal(reverted.runtimeRecommendation.recommendedMode, "stateless");
+  assert.equal(reverted.runtimeRecommendation.automaticPlacement, false);
+  assert.equal(controller.describeRegistry().adaptivePlacementEnabled, false);
+});
+
 test("gateway controller treats malformed runtime hints as diagnostics only", async () => {
   const controller = createHttpSseGatewayController();
 

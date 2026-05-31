@@ -24,6 +24,7 @@ test("operator config parses valid environment overrides", () => {
       MCP_GATEWAY_LOAD_THRESHOLD: "0.75",
       MCP_GATEWAY_SESSION_TTL_MS: "90000",
       MCP_GATEWAY_RECONNECT_GRACE_MS: "12000",
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: "1",
     },
   });
 
@@ -39,6 +40,7 @@ test("operator config parses valid environment overrides", () => {
   assert.equal(config.enforceStartupSecurityAudit, true);
   assert.equal(config.sessionRegistryBackend, "file");
   assert.equal(config.sessionRegistryRedisKey, "mcp:gateway:sessions");
+  assert.equal(config.adaptivePlacementEnabled, true);
 });
 
 test("operator config parses a valid disconnect policy override", () => {
@@ -130,6 +132,14 @@ test("operator config rejects non-positive lifecycle and fleet values", () => {
     () =>
       operatorConfigFromEnv({
         env: { MCP_GATEWAY_ALLOW_PUBLIC_BIND: "maybe" },
+      }),
+    /Expected a boolean environment value/,
+  );
+
+  assert.throws(
+    () =>
+      operatorConfigFromEnv({
+        env: { MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: "maybe" },
       }),
     /Expected a boolean environment value/,
   );

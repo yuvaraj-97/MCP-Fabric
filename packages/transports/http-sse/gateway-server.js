@@ -254,6 +254,7 @@ export function createHttpSseGatewayController({
     allowPublicBind: effectiveAllowPublicBind,
     enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
   } = resolvedOperatorConfig;
+  let adaptivePlacementEnabled = resolvedOperatorConfig.adaptivePlacementEnabled;
   const resolvedSessionRegistry =
     sessionRegistry ??
     createSessionRegistry({
@@ -303,6 +304,7 @@ export function createHttpSseGatewayController({
         host: effectiveHost,
         allowPublicBind: effectiveAllowPublicBind,
         enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
+        adaptivePlacementEnabled,
         filePath:
           typeof resolvedSessionRegistry.filePath === "function"
             ? resolvedSessionRegistry.filePath()
@@ -316,9 +318,22 @@ export function createHttpSseGatewayController({
     },
     describeObservability() {
       return {
+        operatorConfig: {
+          adaptivePlacementEnabled,
+        },
         summary: observer.summary(),
         recentEvents: observer.listEvents(),
       };
+    },
+    setAdaptivePlacementEnabled(enabled) {
+      if (typeof enabled !== "boolean") {
+        throw new TypeError("adaptivePlacementEnabled must be a boolean");
+      }
+      adaptivePlacementEnabled = enabled;
+      observer.record("adaptive.placement.flag.updated", {
+        adaptivePlacementEnabled,
+      });
+      return adaptivePlacementEnabled;
     },
     upsertInstance(instance) {
       const updated = router.upsertInstance(instance);
@@ -417,16 +432,36 @@ export function createHttpSseGatewayController({
         const existingSessionRecord = sessionId
           ? await resolvedSessionRegistry.get(sessionId)
           : undefined;
-        const runtimeMode = resolveRuntimeMode({
+        const phase2RuntimeMode = resolveRuntimeMode({
           body,
           existingSessionRecord,
         });
-        const runtimeRecommendation = resolveRuntimeRecommendation({
+        const baseRuntimeRecommendation = resolveRuntimeRecommendation({
           body,
           existingSessionRecord,
           method,
-          runtimeMode,
+          runtimeMode: phase2RuntimeMode,
         });
+        const placement = resolvePlacementRuntimeMode({
+          adaptivePlacementEnabled,
+          existingSessionRecord,
+          explicitRuntimeMode: body.runtimeMode ?? body.params?.runtimeMode,
+          phase2RuntimeMode,
+          runtimeRecommendation: baseRuntimeRecommendation,
+        });
+        const runtimeMode = placement.runtimeMode;
+        const runtimeRecommendation = {
+          ...baseRuntimeRecommendation,
+          phase: adaptivePlacementEnabled ? "adaptive-placement" : baseRuntimeRecommendation.phase,
+          automaticPlacement: adaptivePlacementEnabled,
+          effectiveRuntimeMode: runtimeMode,
+          adaptivePlacement: {
+            enabled: adaptivePlacementEnabled,
+            applied: placement.applied,
+            source: placement.source,
+            driftFromPhase2Mode: placement.driftFromPhase2Mode,
+          },
+        };
         const requestNow = now();
         observer.record("request.received", {
           method,
@@ -441,6 +476,17 @@ export function createHttpSseGatewayController({
           runtimeMode,
           runtimeRecommendation,
         });
+        if (placement.applied) {
+          observer.record("adaptive.placement.applied", {
+            method,
+            sessionId,
+            phase2RuntimeMode,
+            runtimeMode,
+            recommendedMode: runtimeRecommendation.recommendedMode,
+            driftFromPhase2Mode: placement.driftFromPhase2Mode,
+            source: placement.source,
+          });
+        }
 
         if (method !== "initialize" && !existingSessionRecord) {
           observer.record("request.rejected", {
@@ -863,6 +909,60 @@ function resolveRuntimeRecommendation({ body, existingSessionRecord, method, run
       explicitOverride: false,
     };
   }
+}
+
+function resolvePlacementRuntimeMode({
+  adaptivePlacementEnabled,
+  existingSessionRecord,
+  explicitRuntimeMode,
+  phase2RuntimeMode,
+  runtimeRecommendation,
+}) {
+  if (!adaptivePlacementEnabled) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "phase-2-routing",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  if (explicitRuntimeMode !== undefined) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "explicit-runtime-mode",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  if (existingSessionRecord) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "existing-session-mode",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  let recommendedMode;
+  try {
+    recommendedMode = normalizeRuntimeMode(runtimeRecommendation.recommendedMode);
+  } catch {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "invalid-classifier-recommendation",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  return {
+    runtimeMode: recommendedMode,
+    applied: true,
+    source: "classifier-recommendation",
+    driftFromPhase2Mode: recommendedMode !== phase2RuntimeMode,
+  };
 }
 
 function applyDisconnectPolicy({

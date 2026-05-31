@@ -79,6 +79,12 @@ immediately.
    gateway responses and recorded in observability, but they do not alter
    routing behavior.
 
+   Phase 3 begins with a guarded tracer bullet documented in
+   [`phase-3-adaptive-placement.md`](./phase-3-adaptive-placement.md): adaptive
+   placement defaults off, explicit overrides win, existing sessions keep their
+   stored mode, and only new sessions without an explicit mode may use the
+   classifier recommendation as the routing mode.
+
 9. **Classifier signal sources**
 
    Early classification signals should come from explicit metadata and

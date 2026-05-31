@@ -13,6 +13,7 @@ export const DEFAULT_GATEWAY_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryFilePath: undefined,
   sessionRegistryRedisKey: "mcp:gateway:sessions",
   sessionRegistryRedisUrl: undefined,
+  adaptivePlacementEnabled: false,
 });
 
 export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
@@ -30,6 +31,7 @@ export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryFilePath: undefined,
   sessionRegistryRedisKey: "mcp:gateway:sessions",
   sessionRegistryRedisUrl: undefined,
+  adaptivePlacementEnabled: false,
 });
 
 const ALLOWED_ON_DISCONNECT_VALUES = new Set(["cancel", "queue"]);
@@ -60,6 +62,8 @@ export function resolveOperatorConfig({
       config.sessionRegistryRedisKey ?? defaults.sessionRegistryRedisKey,
     sessionRegistryRedisUrl:
       config.sessionRegistryRedisUrl ?? defaults.sessionRegistryRedisUrl,
+    adaptivePlacementEnabled:
+      config.adaptivePlacementEnabled ?? defaults.adaptivePlacementEnabled,
   };
 
   validateOperatorConfig(resolved);
@@ -112,6 +116,10 @@ export function operatorConfigFromEnv({
         env.MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL ??
         env.MCP_OPERATOR_SESSION_REGISTRY_REDIS_URL ??
         env.REDIS_URL,
+      adaptivePlacementEnabled: parseOptionalBoolean(
+        env.MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED ??
+          env.MCP_OPERATOR_ADAPTIVE_PLACEMENT_ENABLED,
+      ),
     },
   });
 }
@@ -193,6 +201,10 @@ function validateOperatorConfig(config) {
       config.sessionRegistryRedisUrl.trim().length === 0)
   ) {
     throw new TypeError("sessionRegistryRedisUrl must be a non-empty string when provided");
+  }
+
+  if (typeof config.adaptivePlacementEnabled !== "boolean") {
+    throw new TypeError("adaptivePlacementEnabled must be a boolean");
   }
 }
 

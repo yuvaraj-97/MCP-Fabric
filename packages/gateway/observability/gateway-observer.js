@@ -14,6 +14,8 @@ export function createGatewayObserver({ limit = 100, now = () => Date.now() } = 
     totalInstanceUpdates: 0,
     totalRuntimeRecommendations: 0,
     totalRuntimeOverrideWarnings: 0,
+    totalAdaptivePlacements: 0,
+    totalAdaptivePlacementDrifts: 0,
   };
 
   return {
@@ -105,6 +107,13 @@ function applyCounterSideEffects(counters, eventType, payload) {
     counters.totalRuntimeRecommendations += 1;
     if (payload.runtimeRecommendation?.explicitOverride) {
       counters.totalRuntimeOverrideWarnings += 1;
+    }
+  }
+
+  if (eventType === "adaptive.placement.applied") {
+    counters.totalAdaptivePlacements += 1;
+    if (payload.driftFromPhase2Mode) {
+      counters.totalAdaptivePlacementDrifts += 1;
     }
   }
 }
