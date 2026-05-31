@@ -27,6 +27,36 @@ When the flag is true, `runtimeRecommendation.phase` reports
 enabled. Check `runtimeRecommendation.adaptivePlacement.applied` to determine
 whether the recommendation was actually used for a specific request.
 
+## Canary Client Controls
+
+Adaptive placement can be gradually rolled out to a subset of clients using the
+`adaptivePlacementClientAllowlist` configuration.
+
+```sh
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST="client-a,client-b,client-c"
+```
+
+When the allowlist is empty (default), adaptive placement applies to all new
+sessions if `adaptivePlacementEnabled` is true.
+
+When the allowlist is non-empty, adaptive placement applies only to clients
+whose `clientId` is in the allowlist. Clients not in the allowlist use Phase 2
+routing (sticky default). The observability field `runtimeModeSource` shows
+`canary-not-allowed` for requests from non-allowlisted clients.
+Client IDs are matched exactly after trimming allowlist entries; client-provided
+IDs are not lowercased or otherwise normalized.
+
+For in-process controllers:
+
+```javascript
+controller.setAdaptivePlacementClientAllowlist(["client-a", "client-b"]);
+```
+
+The in-process setters update only the local gateway process. In a horizontally
+scaled deployment, rollbacks and canary changes should be applied through the
+operator-managed environment or deployment configuration for every gateway
+instance.
+
 ## Placement Semantics
 
 Phase 3 supports only the implemented `stateless` and `sticky` modes.
@@ -48,6 +78,23 @@ placement input.
 Every request still records `runtime.recommendation`. When adaptive placement
 actually uses the classifier recommendation for a new session, the gateway also
 records `adaptive.placement.applied`.
+
+## Runtime Mode Source
+
+Every response includes `runtimeModeSource` in the `adaptivePlacement` object.
+Every session lifecycle record stores the original source that created or last
+explicitly changed the session mode. Operators can use these fields to
+understand routing decisions:
+
+- `explicit`: The client provided an explicit `runtimeMode` override.
+- `existing-session`: The session already existed with a stored mode; the mode
+  did not flip. Session metadata preserves the original stored source.
+- `adaptive-classifier`: The classifier recommendation was used for a new
+  session.
+- `phase-2-default`: Phase 3 is disabled; Phase 2 default (sticky) applies.
+- `canary-not-allowed`: The client is not in the adaptive placement allowlist.
+- `invalid-classifier-recommendation`: The classifier returned an invalid
+  recommendation; Phase 2 default applies.
 
 Operator counters include:
 

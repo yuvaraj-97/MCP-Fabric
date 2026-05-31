@@ -255,6 +255,7 @@ export function createHttpSseGatewayController({
     enforceStartupSecurityAudit: effectiveEnforceStartupSecurityAudit,
   } = resolvedOperatorConfig;
   let adaptivePlacementEnabled = resolvedOperatorConfig.adaptivePlacementEnabled;
+  let adaptivePlacementClientAllowlist = resolvedOperatorConfig.adaptivePlacementClientAllowlist;
   const resolvedSessionRegistry =
     sessionRegistry ??
     createSessionRegistry({
@@ -320,6 +321,7 @@ export function createHttpSseGatewayController({
       return {
         operatorConfig: {
           adaptivePlacementEnabled,
+          adaptivePlacementClientAllowlistSize: adaptivePlacementClientAllowlist.length,
         },
         summary: observer.summary(),
         recentEvents: observer.listEvents(),
@@ -334,6 +336,21 @@ export function createHttpSseGatewayController({
         adaptivePlacementEnabled,
       });
       return adaptivePlacementEnabled;
+    },
+    setAdaptivePlacementClientAllowlist(allowlist) {
+      if (!Array.isArray(allowlist)) {
+        throw new TypeError("adaptivePlacementClientAllowlist must be an array");
+      }
+      for (const clientId of allowlist) {
+        if (typeof clientId !== "string" || clientId.trim().length === 0) {
+          throw new TypeError("adaptivePlacementClientAllowlist items must be non-empty strings");
+        }
+      }
+      adaptivePlacementClientAllowlist = [...allowlist];
+      observer.record("adaptive.placement.allowlist.updated", {
+        allowlistSize: adaptivePlacementClientAllowlist.length,
+      });
+      return [...adaptivePlacementClientAllowlist];
     },
     upsertInstance(instance) {
       const updated = router.upsertInstance(instance);
@@ -442,10 +459,14 @@ export function createHttpSseGatewayController({
           method,
           runtimeMode: phase2RuntimeMode,
         });
+        const clientId = body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client";
+        const explicitRuntimeMode = body.runtimeMode ?? body.params?.runtimeMode;
         const placement = resolvePlacementRuntimeMode({
           adaptivePlacementEnabled,
+          adaptivePlacementClientAllowlist,
+          clientId,
           existingSessionRecord,
-          explicitRuntimeMode: body.runtimeMode ?? body.params?.runtimeMode,
+          explicitRuntimeMode,
           phase2RuntimeMode,
           runtimeRecommendation: baseRuntimeRecommendation,
         });
@@ -459,6 +480,7 @@ export function createHttpSseGatewayController({
             enabled: adaptivePlacementEnabled,
             applied: placement.applied,
             source: placement.source,
+            runtimeModeSource: placement.runtimeModeSource,
             driftFromPhase2Mode: placement.driftFromPhase2Mode,
           },
         };
@@ -522,9 +544,13 @@ export function createHttpSseGatewayController({
         const route = await router.routeSession(sessionId, { runtimeMode });
         const lifecycleMetadata = buildLifecycleMetadata({
           existingRecord: existingSessionRecord,
-          clientId: body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client",
+          clientId,
           now: requestNow,
           runtimeMode,
+          runtimeModeSource:
+            explicitRuntimeMode !== undefined
+              ? placement.runtimeModeSource
+              : (existingSessionRecord?.metadata?.runtimeModeSource ?? placement.runtimeModeSource),
           sessionTtlMs: effectiveSessionTtlMs,
         });
         await resolvedSessionRegistry.assign(
@@ -835,10 +861,11 @@ function deriveReconnectState(existingSessionRecord, requestNow) {
   return "grace-expired";
 }
 
-function buildLifecycleMetadata({ existingRecord, clientId, now, runtimeMode, sessionTtlMs }) {
+function buildLifecycleMetadata({ existingRecord, clientId, now, runtimeMode, runtimeModeSource, sessionTtlMs }) {
   return {
     clientId,
     runtimeMode,
+    runtimeModeSource,
     connectionState: "active",
     disconnectedAt: null,
     graceUntil: null,
@@ -913,6 +940,8 @@ function resolveRuntimeRecommendation({ body, existingSessionRecord, method, run
 
 function resolvePlacementRuntimeMode({
   adaptivePlacementEnabled,
+  adaptivePlacementClientAllowlist,
+  clientId,
   existingSessionRecord,
   explicitRuntimeMode,
   phase2RuntimeMode,
@@ -923,6 +952,7 @@ function resolvePlacementRuntimeMode({
       runtimeMode: phase2RuntimeMode,
       applied: false,
       source: "phase-2-routing",
+      runtimeModeSource: "phase-2-default",
       driftFromPhase2Mode: false,
     };
   }
@@ -932,6 +962,7 @@ function resolvePlacementRuntimeMode({
       runtimeMode: phase2RuntimeMode,
       applied: false,
       source: "explicit-runtime-mode",
+      runtimeModeSource: "explicit",
       driftFromPhase2Mode: false,
     };
   }
@@ -941,6 +972,17 @@ function resolvePlacementRuntimeMode({
       runtimeMode: phase2RuntimeMode,
       applied: false,
       source: "existing-session-mode",
+      runtimeModeSource: "existing-session",
+      driftFromPhase2Mode: false,
+    };
+  }
+
+  if (adaptivePlacementClientAllowlist.length > 0 && !adaptivePlacementClientAllowlist.includes(clientId)) {
+    return {
+      runtimeMode: phase2RuntimeMode,
+      applied: false,
+      source: "canary-client-not-allowed",
+      runtimeModeSource: "canary-not-allowed",
       driftFromPhase2Mode: false,
     };
   }
@@ -953,6 +995,7 @@ function resolvePlacementRuntimeMode({
       runtimeMode: phase2RuntimeMode,
       applied: false,
       source: "invalid-classifier-recommendation",
+      runtimeModeSource: "invalid-classifier-recommendation",
       driftFromPhase2Mode: false,
     };
   }
@@ -961,6 +1004,7 @@ function resolvePlacementRuntimeMode({
     runtimeMode: recommendedMode,
     applied: true,
     source: "classifier-recommendation",
+    runtimeModeSource: "adaptive-classifier",
     driftFromPhase2Mode: recommendedMode !== phase2RuntimeMode,
   };
 }
