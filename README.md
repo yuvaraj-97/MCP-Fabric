@@ -1,4 +1,4 @@
-# MCP Transport Infrastructure
+# MCP-Fabric
 
 Session-aware, transport-agnostic infrastructure for MCP-compatible deployments.
 
@@ -53,6 +53,7 @@ Runtime Infrastructure
 
 ```text
 docs/
+  adaptive-runtime-fabric-decisions.md
   agentic-scale-up-plan.md
   design.md
   session-affinity.md
@@ -128,6 +129,9 @@ What still remains outside the official SDK path:
 
 The concrete next-phase deployment proof is documented in
 [docs/real-world-validation-plan.md](./docs/real-world-validation-plan.md).
+The approved planning baseline for the adaptive runtime fabric direction is
+documented in
+[docs/adaptive-runtime-fabric-decisions.md](./docs/adaptive-runtime-fabric-decisions.md).
 
 ## Operator Configuration
 
@@ -186,6 +190,11 @@ That keeps the architecture clean:
 The current repo direction still prefers the self-hosted/local gateway outcome,
 but it should be built on top of a shared core rather than invented as a
 one-off runtime.
+
+The adaptive runtime fabric direction builds on this same order: reusable core
+first, gateway second, adaptive placement and runtime orchestration later. The
+near-term committed runtime modes are `stateless` and `sticky`; richer modes are
+reserved until their recovery and migration behavior is specified and validated.
 
 ## Install
 

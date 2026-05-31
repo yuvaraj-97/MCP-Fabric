@@ -2,11 +2,28 @@
 
 This document serves as the technical blueprint for hardening the MCP gateway for production deployments. It is intended to be executed by autonomous multi-agent systems.
 
+Maturity note:
+
+- Adoptable now: bounded logs, registry interface hardening, Redis-backed
+  session registry, SDK-backed core request handling, startup security audits,
+  and explicit disconnect strategies.
+- Deferred until the adaptive runtime fabric rollout gates are met: hot context
+  checkpointing, live state migration, and direct infrastructure provisioning.
+  See
+  [adaptive-runtime-fabric-decisions.md](./adaptive-runtime-fabric-decisions.md).
+
 ## 1. Hot Instance Context Migration & Auto-Scaling
 **Objective:** Enable dynamic scaling and state preservation for overloaded servers.
 - **Context Checkpointing:** Implement periodic serialization of session state from MCP Servers to a Redis cluster.
 - **Dynamic Reassignment:** If a server's load reaches a critical threshold (e.g., 90%), the gateway must pause routing to it, assign the session to a healthy server, and instruct the new server to pull and deserialize context from Redis.
 - **Auto-Scaler Hook:** Implement `AutoScalerHook` within `LoadRouter` to emit provisioning events (or call scaling APIs) when average cluster load exceeds 80%.
+
+Status:
+
+- Deferred for hot context checkpointing and live state migration.
+- The near-term production behavior is to stop assigning new sessions above the
+  configured threshold, keep existing sticky sessions on healthy runtimes, and
+  emit operator-visible events or hooks for external orchestration.
 
 ## 2. In-Memory Bottlenecks
 **Objective:** Remove memory leaks and enable horizontal scaling of the Gateway itself.

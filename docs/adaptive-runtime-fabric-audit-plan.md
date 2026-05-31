@@ -2,6 +2,19 @@
 
 You are joining an existing project called MCP-Fabric.
 
+This document describes the long-term direction and audit workflow. The
+approved planning baseline for the next phase is recorded in
+[`docs/adaptive-runtime-fabric-decisions.md`](./adaptive-runtime-fabric-decisions.md).
+Use that decision record to interpret this vision conservatively:
+
+- keep the current gateway and transport infrastructure as the near-term
+  foundation;
+- implement `stateless` and `sticky` modes first;
+- reserve `soft_sticky`, `pinned`, and `hybrid` until their behavior is
+  specified and validated;
+- do not implement automatic placement, hot migration, or fabric-owned
+  application state before the documented rollout gates are met.
+
 Your role is not to immediately start coding. Your first responsibility is to
 understand the repository, audit the current architecture, identify gaps
 relative to the target vision below, and then help plan and implement changes
