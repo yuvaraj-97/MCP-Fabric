@@ -48,6 +48,8 @@ services:
       MCP_GATEWAY_SESSION_REGISTRY_BACKEND: redis
       MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL: redis://redis:6379
       MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: mcp:gateway:sessions
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED:-false}
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST:-}
       SERVER_INSTANCES_JSON: >-
         [{"serverInstanceId":"fs-a","load":0.12,"healthy":true,"acceptingNewSessions":true},{"serverInstanceId":"fs-b","load":0.26,"healthy":true,"acceptingNewSessions":true}]
       REMOTE_BASE_URLS_JSON: >-
@@ -74,6 +76,8 @@ services:
       MCP_GATEWAY_SESSION_REGISTRY_BACKEND: redis
       MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL: redis://redis:6379
       MCP_GATEWAY_SESSION_REGISTRY_REDIS_KEY: mcp:gateway:sessions
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED:-false}
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST:-}
       SERVER_INSTANCES_JSON: >-
         [{"serverInstanceId":"fs-a","load":0.12,"healthy":true,"acceptingNewSessions":true},{"serverInstanceId":"fs-b","load":0.26,"healthy":true,"acceptingNewSessions":true}]
       REMOTE_BASE_URLS_JSON: >-
@@ -92,4 +96,5 @@ services:
       MCP_SHARED_REDIS_GATEWAY_A_URL: http://gateway-a:4200
       MCP_SHARED_REDIS_GATEWAY_B_URL: http://gateway-b:4201
       MCP_SHARED_REDIS_SERVER_URLS: fs-a=http://mcp-server-a:4101,fs-b=http://mcp-server-b:4102
+      MCP_SHARED_REDIS_ADAPTIVE_PLACEMENT: ${MCP_SHARED_REDIS_ADAPTIVE_PLACEMENT:-0}
     command: ["node", "validation/shared-redis/run-proof.js"]

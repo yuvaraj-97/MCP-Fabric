@@ -389,6 +389,13 @@ Run the remote-process filesystem proof with adaptive placement enabled:
 npm run validate:filesystem:multicontainer:adaptive
 ```
 
+Run the shared-Redis cross-gateway proof with adaptive placement enabled
+against an already-running topology:
+
+```sh
+npm run validate:shared-redis:adaptive
+```
+
 Run the existing unit and integration tests to ensure Phase 3 does not
 regress Phase 2 behavior:
 

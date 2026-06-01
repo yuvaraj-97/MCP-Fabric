@@ -18,6 +18,16 @@ Run the full topology:
 docker compose -f validation/shared-redis/compose.yaml up --abort-on-container-exit client
 ```
 
+Run the same topology with Phase 3 adaptive placement enabled for the
+shared-Redis proof client:
+
+```sh
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED=true \
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST=shared-redis-adaptive-client \
+MCP_SHARED_REDIS_ADAPTIVE_PLACEMENT=1 \
+docker compose -f validation/shared-redis/compose.yaml up --abort-on-container-exit client
+```
+
 The stack includes:
 
 - `redis`
@@ -38,18 +48,27 @@ MCP_SHARED_REDIS_SERVER_URLS=fs-a=http://127.0.0.1:4101,fs-b=http://127.0.0.1:41
 npm run validate:shared-redis
 ```
 
+For an already-running topology whose gateways were started with adaptive
+placement enabled and the `shared-redis-adaptive-client` allowlisted:
+
+```sh
+MCP_SHARED_REDIS_GATEWAY_A_URL=http://127.0.0.1:4200 \
+MCP_SHARED_REDIS_GATEWAY_B_URL=http://127.0.0.1:4201 \
+MCP_SHARED_REDIS_SERVER_URLS=fs-a=http://127.0.0.1:4101,fs-b=http://127.0.0.1:4102 \
+npm run validate:shared-redis:adaptive
+```
+
 ## What It Proves
 
-- the session mapping is stored outside one gateway process
-- gateway B can reuse the same session ID created through gateway A
-- the reused session keeps the same target MCP server instance
-- `/sessions` and `/observability` can be inspected on both gateways
-
-The unit-level shared-registry tests also cover the Phase 3 adaptive placement
-case. When gateway A creates an adaptive stateless session, gateway B must read
-the stored `runtimeMode` and `runtimeModeSource` from the shared registry. The
-follow-up may reassign because the stored mode is stateless, but it must not
-turn into a new adaptive fallback or mismatch.
+- the session mapping is stored outside one gateway process.
+- gateway B can reuse the same session ID created through gateway A.
+- when Phase 3 adaptive placement is enabled:
+  - gateway A uses client-provided runtime hints to automatically classify the session as `stateless`.
+  - the session is stored in Redis with `runtimeMode=stateless` and `runtimeModeSource=adaptive-classifier`.
+  - gateway B preserves the stored `runtimeMode` and `runtimeModeSource` on follow-up requests.
+  - because the session is `stateless`, gateway B may dynamically load-balance and route to a different server instance (reassigning/rehydrating without enforcing strict sticky affinity).
+  - gateway B records the original source metadata under `existing-session` and does not increment new fallback/mismatch counters.
+- `/sessions` and `/observability` can be inspected on both gateways.
 
 ## Useful Endpoints
 

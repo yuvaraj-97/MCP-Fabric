@@ -27,6 +27,7 @@
     "validate:adaptive-placement:real-workloads": "node validation/adaptive-placement/run-real-workload-validation.js",
     "validate:adaptive-placement:sustained": "node validation/adaptive-placement/run-sustained-validation.js",
     "validate:shared-redis": "node validation/shared-redis/run-proof.js",
+    "validate:shared-redis:adaptive": "MCP_SHARED_REDIS_ADAPTIVE_PLACEMENT=1 node validation/shared-redis/run-proof.js",
     "validate:burst-memory": "node --expose-gc validation/burst-memory/run-proof.js",
     "check": "npm test"
   },
