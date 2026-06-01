@@ -23,6 +23,7 @@
     "validate:memory:multicontainer": "node validation/memory/run-multicontainer-proof.js",
     "validate:adaptive-placement": "node validation/adaptive-placement/run-validation.js",
     "validate:adaptive-placement:load": "node --expose-gc validation/adaptive-placement/run-load-validation.js",
+    "validate:adaptive-placement:real-workloads": "node validation/adaptive-placement/run-real-workload-validation.js",
     "validate:shared-redis": "node validation/shared-redis/run-proof.js",
     "validate:burst-memory": "node --expose-gc validation/burst-memory/run-proof.js",
     "check": "npm test"

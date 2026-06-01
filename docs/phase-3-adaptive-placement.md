@@ -220,6 +220,34 @@ because the stored mode is stateless, but session metadata must continue to show
 the original `runtimeModeSource=adaptive-classifier`. The second gateway must
 not count that follow-up as a new adaptive placement fallback or mismatch.
 
+## Real-Workload Telemetry Validation
+
+The real-workload validation runs the filesystem, git, and memory validation
+applications through the adaptive placement gate with an allowlisted client:
+
+```sh
+npm run validate:adaptive-placement:real-workloads
+```
+
+Each workload sends replay-safe, read-only, external-state hints on
+`initialize`, runs one safe tool call, and captures:
+
+- `recommendedMode` and `confidence`;
+- whether adaptive placement applied;
+- `runtimeModeSource`;
+- drift from the Phase 2 sticky default;
+- placement, fallback, and mismatch counters.
+
+The proof intentionally backs filesystem, git, and memory with state shared by
+both in-process validation server instances. Operators must not copy the
+`externalState=true` hint to local filesystem, local git working tree, or
+in-memory cache workloads unless that state is actually externalized through a
+shared volume, remote API, Redis-like store, or equivalent backing service.
+
+This proof is the first Stage 6 evidence that classifier quality remains
+consistent across the existing filesystem, git, and memory real-workload
+targets, not only synthetic controller traffic.
+
 ### Pre-Canary Baseline
 
 Before enabling Phase 3 in production, establish a baseline with Phase 2:
@@ -300,6 +328,12 @@ Run the load telemetry proof:
 
 ```sh
 npm run validate:adaptive-placement:load
+```
+
+Run the real-workload telemetry proof:
+
+```sh
+npm run validate:adaptive-placement:real-workloads
 ```
 
 Run the existing unit and integration tests to ensure Phase 3 does not
