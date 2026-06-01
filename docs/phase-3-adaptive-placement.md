@@ -173,6 +173,44 @@ The validation harness:
 5. Verifies `totalAdaptivePlacementMismatches` remains `0` and fallback events
    are explainable.
 
+## Load Telemetry Validation
+
+The adaptive placement load validation exercises mixed canary, control, and
+explicit-override traffic under configurable concurrency:
+
+```sh
+npm run validate:adaptive-placement:load
+```
+
+By default it creates 5,000 initialize requests with concurrency 100. Override
+the defaults with:
+
+```sh
+MCP_ADAPTIVE_LOAD_SESSION_COUNT=10000 \
+MCP_ADAPTIVE_LOAD_CONCURRENCY=200 \
+npm run validate:adaptive-placement:load
+```
+
+With `adaptivePlacementEnabled=true`, the proof verifies:
+
+- `totalAdaptivePlacements + totalAdaptivePlacementFallbacks` equals
+  `totalInitializations`;
+- canary clients with replay-safe/read-only/external-state hints are placed
+  statelessly;
+- non-allowlisted clients and explicit overrides are counted as fallbacks;
+- `totalAdaptivePlacementMismatches` remains `0`;
+- recent observability events remain bounded by the observer window;
+- peak and retained heap growth remain under configured ceilings.
+
+The default memory ceilings scale with `MCP_ADAPTIVE_LOAD_SESSION_COUNT`. For
+unusual environments, override them with:
+
+```sh
+MCP_ADAPTIVE_LOAD_MAX_PEAK_HEAP_BYTES=268435456 \
+MCP_ADAPTIVE_LOAD_MAX_RETAINED_HEAP_BYTES=67108864 \
+npm run validate:adaptive-placement:load
+```
+
 ### Pre-Canary Baseline
 
 Before enabling Phase 3 in production, establish a baseline with Phase 2:
@@ -229,8 +267,10 @@ reinitialized. New sessions revert to Phase 2 sticky default.
 
 3. Run `npm run validate:adaptive-placement` before sending production traffic
    through the canary.
-4. Monitor `/observability` for the counters listed above.
-5. Widen the allowlist only while mismatches remain zero and fallbacks are
+4. Run `npm run validate:adaptive-placement:load` before widening the canary to
+   a larger internal client set.
+5. Monitor `/observability` for the counters listed above.
+6. Widen the allowlist only while mismatches remain zero and fallbacks are
    explained by expected sources.
 
 ### Full Test Suite
@@ -245,6 +285,12 @@ Run the canary test suite:
 
 ```sh
 node --test tests/validation/adaptive-placement-canary.test.js
+```
+
+Run the load telemetry proof:
+
+```sh
+npm run validate:adaptive-placement:load
 ```
 
 Run the existing unit and integration tests to ensure Phase 3 does not
