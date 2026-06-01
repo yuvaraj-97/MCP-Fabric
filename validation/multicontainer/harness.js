@@ -11,24 +11,27 @@ import { allocatePort, spawnNodeProcess } from "./process-utils.js";
 
 const DEFAULT_RELATIVE_PATH = "notes/multicontainer-proof.txt";
 const DEFAULT_CONTENT = "filesystem multi-container proof works";
+const ADAPTIVE_CLIENT_ID = "multicontainer-adaptive-client";
 
 export async function runFilesystemMulticontainerProof({
   gatewayBaseUrl,
   remoteServerBaseUrls,
   rootDir = createFilesystemValidationWorkspace("filesystem-multicontainer"),
   cleanup = false,
+  adaptivePlacement = false,
 } = {}) {
   const processes = [];
 
   try {
     const topology = gatewayBaseUrl
       ? await connectToExternalTopology({ gatewayBaseUrl, remoteServerBaseUrls })
-      : await startLocalTopology({ rootDir, processes });
+      : await startLocalTopology({ rootDir, processes, adaptivePlacement });
 
     const report = await driveFilesystemRemoteProof({
       gatewayBaseUrl: topology.gatewayBaseUrl,
       remoteServers: topology.remoteServers,
       rootDir,
+      adaptivePlacement,
     });
 
     return {
@@ -53,10 +56,20 @@ export async function driveFilesystemRemoteProof({
   rootDir,
   relativePath = DEFAULT_RELATIVE_PATH,
   content = DEFAULT_CONTENT,
+  adaptivePlacement = false,
 } = {}) {
   const initialized = await sendGatewayMessage(gatewayBaseUrl, {
     method: "initialize",
-    params: { clientId: "multicontainer-client" },
+    params: adaptivePlacement
+      ? {
+          clientId: ADAPTIVE_CLIENT_ID,
+          runtimeHints: {
+            replaySafe: true,
+            readOnly: true,
+            externalState: true,
+          },
+        }
+      : { clientId: "multicontainer-client" },
   });
   const sessionId = initialized.sessionId;
 
@@ -75,6 +88,46 @@ export async function driveFilesystemRemoteProof({
       },
     },
   });
+
+  let adaptiveStat = null;
+  if (adaptivePlacement) {
+    const alternateServer = remoteServers.find(
+      (server) => server.serverInstanceId !== initialized.serverInstanceId,
+    );
+    if (!alternateServer) {
+      throw new Error("Adaptive multi-container proof requires at least two remote servers");
+    }
+
+    await setInstanceHealth(gatewayBaseUrl, initialized.serverInstanceId, {
+      load: 0.7,
+      healthy: true,
+      acceptingNewSessions: true,
+    });
+    await setInstanceHealth(gatewayBaseUrl, alternateServer.serverInstanceId, {
+      load: 0.1,
+      healthy: true,
+      acceptingNewSessions: true,
+    });
+    await delay(50);
+
+    adaptiveStat = await sendGatewayMessage(gatewayBaseUrl, {
+      method: "tools/call",
+      sessionId,
+      params: {
+        clientId: ADAPTIVE_CLIENT_ID,
+        runtimeHints: {
+          replaySafe: true,
+          readOnly: true,
+          externalState: true,
+        },
+        name: "fs_stat",
+        arguments: {
+          path: relativePath,
+        },
+      },
+    });
+  }
+
   const listResult = await sendGatewayMessage(gatewayBaseUrl, {
     method: "tools/call",
     sessionId,
@@ -122,7 +175,24 @@ export async function driveFilesystemRemoteProof({
 
   return {
     checks: {
-      stickyRouting: initialized.serverInstanceId === stickyStat.serverInstanceId,
+      stickyRouting: adaptivePlacement || initialized.serverInstanceId === stickyStat.serverInstanceId,
+      adaptivePlacement:
+        !adaptivePlacement ||
+        initialized.runtimeMode === "stateless" &&
+          initialized.runtimeRecommendation?.adaptivePlacement?.applied === true &&
+          initialized.runtimeRecommendation?.adaptivePlacement?.runtimeModeSource === "adaptive-classifier",
+      adaptiveDynamicRouting:
+        !adaptivePlacement ||
+        (adaptiveStat &&
+          initialized.serverInstanceId !== adaptiveStat.serverInstanceId &&
+          adaptiveStat.runtimeMode === "stateless" &&
+          adaptiveStat.runtimeRecommendation?.adaptivePlacement?.runtimeModeSource === "existing-session"),
+      adaptiveTelemetry:
+        !adaptivePlacement ||
+        observability.summary.totalAdaptivePlacements === 1 &&
+          observability.summary.totalAdaptivePlacementStateless === 1 &&
+          observability.summary.totalAdaptivePlacementFallbacks === 0 &&
+          observability.summary.totalAdaptivePlacementMismatches === 0,
       unhealthyReassignment:
         initialized.serverInstanceId !== reassignedRead.serverInstanceId,
       artifactVisibleThroughMcp:
@@ -147,13 +217,15 @@ export async function driveFilesystemRemoteProof({
       listResult: listResult.result.structuredContent,
       stickyStat: stickyStat.result.structuredContent,
       stickyServerInstanceId: stickyStat.serverInstanceId,
+      adaptiveStat: adaptiveStat?.result.structuredContent ?? null,
+      adaptiveStatServerInstanceId: adaptiveStat?.serverInstanceId ?? null,
       reassignedReadResult: reassignedRead.result.structuredContent,
       reassignedServerInstanceId: reassignedRead.serverInstanceId,
     },
   };
 }
 
-async function startLocalTopology({ rootDir, processes }) {
+async function startLocalTopology({ rootDir, processes, adaptivePlacement = false }) {
   const cwd = resolve(process.cwd());
   const serverScript = resolve(cwd, "validation/multicontainer/remote-filesystem-server.js");
   const gatewayScript = resolve(cwd, "validation/multicontainer/remote-gateway.js");
@@ -195,6 +267,8 @@ async function startLocalTopology({ rootDir, processes }) {
         "fs-a": `http://127.0.0.1:${readyA.port}`,
         "fs-b": `http://127.0.0.1:${readyB.port}`,
       }),
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: adaptivePlacement ? "true" : "false",
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: adaptivePlacement ? ADAPTIVE_CLIENT_ID : "",
     },
   });
   processes.push(gateway);

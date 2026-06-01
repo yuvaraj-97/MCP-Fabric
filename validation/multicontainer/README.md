@@ -27,6 +27,13 @@ Run the default local multi-process proof:
 npm run validate:filesystem:multicontainer
 ```
 
+Run the same local multi-process topology with Phase 3 adaptive placement
+enabled for the validation client:
+
+```sh
+npm run validate:filesystem:multicontainer:adaptive
+```
+
 Run the same proof as a Docker-based multi-container topology:
 
 ```sh
@@ -66,6 +73,7 @@ npm run validate:filesystem:multicontainer
 Optional:
 
 - `MCP_MULTICONTAINER_KEEP_ARTIFACTS=1`
+- `MCP_MULTICONTAINER_ADAPTIVE_PLACEMENT=1`
 
 ## What The Proof Checks
 
@@ -76,6 +84,16 @@ Optional:
 - unhealthy server state causes reassignment to another remote server
 - the created artifact remains visible after reassignment
 - gateway `/sessions` and `/observability` report the lifecycle correctly
+
+When adaptive placement is enabled, the proof also checks:
+
+- the allowlisted validation client initializes with `runtimeMode=stateless`
+  from `runtimeModeSource=adaptive-classifier`
+- a follow-up request routes to a different healthy remote server after load
+  changes, proving stateless dynamic placement over real HTTP process
+  boundaries
+- adaptive placement counters show one placement, zero fallbacks, and zero
+  mismatches
 
 ## Useful Endpoints
 

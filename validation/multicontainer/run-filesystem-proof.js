@@ -7,6 +7,9 @@ const report = await runFilesystemMulticontainerProof({
   gatewayBaseUrl,
   remoteServerBaseUrls,
   cleanup: process.env.MCP_MULTICONTAINER_KEEP_ARTIFACTS !== "1",
+  adaptivePlacement:
+    process.env.MCP_MULTICONTAINER_ADAPTIVE_PLACEMENT === "1" ||
+    process.env.MCP_MULTICONTAINER_ADAPTIVE_PLACEMENT === "true",
 });
 
 console.log("Filesystem multi-container proof completed.");
