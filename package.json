@@ -22,6 +22,7 @@
     "validate:git:multicontainer": "node validation/git/run-multicontainer-proof.js",
     "validate:memory": "node validation/memory/run-validation.js",
     "validate:memory:multicontainer": "node validation/memory/run-multicontainer-proof.js",
+    "validate:memory:multicontainer:adaptive": "MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT=1 node validation/memory/run-multicontainer-proof.js",
     "validate:adaptive-placement": "node validation/adaptive-placement/run-validation.js",
     "validate:adaptive-placement:load": "node --expose-gc validation/adaptive-placement/run-load-validation.js",
     "validate:adaptive-placement:real-workloads": "node validation/adaptive-placement/run-real-workload-validation.js",

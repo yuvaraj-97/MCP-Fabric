@@ -13,6 +13,7 @@ import "./validation/git-validation.test.js";
 import "./validation/git-multicontainer.test.js";
 import "./validation/memory-validation.test.js";
 import "./validation/memory-multicontainer.test.js";
+import "./validation/memory-multicontainer-adaptive.test.js";
 import "./validation/burst-memory-validation.test.js";
 import "./validation/adaptive-placement-validation.test.js";
 import "./validation/adaptive-placement-canary.test.js";

@@ -5,6 +5,7 @@ services:
     volumes:
       - ../../:/workspace
     environment:
+      HOST: "0.0.0.0"
       PORT: "4111"
       STORE_FILE: /workspace/validation-artifacts/memory-multicontainer/memory-store.json
       SERVER_INSTANCE_ID: mem-a
@@ -16,6 +17,7 @@ services:
     volumes:
       - ../../:/workspace
     environment:
+      HOST: "0.0.0.0"
       PORT: "4112"
       STORE_FILE: /workspace/validation-artifacts/memory-multicontainer/memory-store.json
       SERVER_INSTANCE_ID: mem-b
@@ -35,6 +37,8 @@ services:
       LOAD_THRESHOLD: "0.8"
       MCP_GATEWAY_ALLOW_PUBLIC_BIND: "1"
       MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT: "0"
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED:-false}
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST:-}
       SERVER_INSTANCES_JSON: >-
         [{"serverInstanceId":"mem-a","load":0.14,"healthy":true,"acceptingNewSessions":true},
         {"serverInstanceId":"mem-b","load":0.26,"healthy":true,"acceptingNewSessions":true}]
@@ -53,4 +57,5 @@ services:
       MCP_MEMORY_MULTICONTAINER_GATEWAY_URL: http://gateway:4210
       MCP_MEMORY_MULTICONTAINER_SERVER_URLS: mem-a=http://mcp-server-a:4111,mem-b=http://mcp-server-b:4112
       MCP_MEMORY_MULTICONTAINER_KEEP_ARTIFACTS: "1"
+      MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT: ${MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT:-0}
     command: ["node", "validation/memory/run-multicontainer-proof.js"]

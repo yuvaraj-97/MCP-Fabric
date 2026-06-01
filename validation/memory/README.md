@@ -26,9 +26,25 @@ Run the default local multi-process proof:
 npm run validate:memory:multicontainer
 ```
 
+Run the same local multi-process topology with Phase 3 adaptive placement
+enabled for the validation client:
+
+```sh
+npm run validate:memory:multicontainer:adaptive
+```
+
 Run the same proof as a Docker-based multi-container topology:
 
 ```sh
+docker compose -f validation/memory/compose.multicontainer.yaml up --abort-on-container-exit client
+```
+
+Run the Docker topology with adaptive placement enabled:
+
+```sh
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED=true \
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST=memory-multicontainer-adaptive-client \
+MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT=1 \
 docker compose -f validation/memory/compose.multicontainer.yaml up --abort-on-container-exit client
 ```
 
@@ -64,6 +80,7 @@ npm run validate:memory:multicontainer
 Optional:
 
 - `MCP_MEMORY_MULTICONTAINER_KEEP_ARTIFACTS=1`
+- `MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT=1`
 
 ## What The Proof Checks
 
@@ -76,6 +93,16 @@ Optional:
 - the shared store file shows the same memory outside either server process
 - both remote servers expose the shared-memory snapshot
 - gateway `/sessions` and `/observability` report the lifecycle correctly
+
+When adaptive placement is enabled, the proof also checks:
+
+- the allowlisted validation client initializes with `runtimeMode=stateless`
+  from `runtimeModeSource=adaptive-classifier`
+- a follow-up `memory_recall` routes to a different healthy remote server after
+  load changes, while the remembered value remains visible through the shared
+  file-backed store
+- adaptive placement counters show one placement, zero fallbacks, and zero
+  mismatches
 
 ## Useful Endpoints
 

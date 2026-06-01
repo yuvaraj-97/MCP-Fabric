@@ -9,28 +9,32 @@ const DEFAULT_NAMESPACE = "operations";
 const DEFAULT_KEY = "rollout-brief";
 const DEFAULT_VALUE =
   "Use the gateway as the shared communication layer between clients and remote MCP servers.";
+const ADAPTIVE_CLIENT_ID = "memory-multicontainer-adaptive-client";
 
 export async function runMemoryMulticontainerProof({
   gatewayBaseUrl,
   remoteServerBaseUrls,
   storeFile = createDefaultStoreFile(),
   cleanup = false,
+  adaptivePlacement = false,
 } = {}) {
   const processes = [];
 
   try {
     const topology = gatewayBaseUrl
       ? await connectToExternalTopology({ gatewayBaseUrl, remoteServerBaseUrls, storeFile })
-      : await startLocalTopology({ storeFile, processes });
+      : await startLocalTopology({ storeFile, processes, adaptivePlacement });
+    await waitForTopology(topology);
 
     const report = await driveMemoryRemoteProof({
       gatewayBaseUrl: topology.gatewayBaseUrl,
       remoteServers: topology.remoteServers,
       storeFile,
+      adaptivePlacement,
     });
 
     return {
-      ok: true,
+      ok: Object.values(report.checks).every((value) => value === true),
       mode: topology.mode,
       storeFile,
       topology,
@@ -51,10 +55,20 @@ export async function driveMemoryRemoteProof({
   namespace = DEFAULT_NAMESPACE,
   key = DEFAULT_KEY,
   value = DEFAULT_VALUE,
+  adaptivePlacement = false,
 } = {}) {
   const initialized = await sendGatewayMessage(gatewayBaseUrl, {
     method: "initialize",
-    params: { clientId: "multicontainer-memory-client" },
+    params: adaptivePlacement
+      ? {
+          clientId: ADAPTIVE_CLIENT_ID,
+          runtimeHints: {
+            replaySafe: true,
+            readOnly: true,
+            externalState: true,
+          },
+        }
+      : { clientId: "multicontainer-memory-client" },
   });
   const sessionId = initialized.sessionId;
 
@@ -96,6 +110,46 @@ export async function driveMemoryRemoteProof({
     },
   });
 
+  let adaptiveRecall = null;
+  if (adaptivePlacement) {
+    const alternateServer = remoteServers.find(
+      (server) => server.serverInstanceId !== initialized.serverInstanceId,
+    );
+    if (!alternateServer) {
+      throw new Error("Adaptive memory multi-container proof requires at least two remote servers");
+    }
+
+    await setInstanceHealth(gatewayBaseUrl, initialized.serverInstanceId, {
+      load: 0.7,
+      healthy: true,
+      acceptingNewSessions: true,
+    });
+    await setInstanceHealth(gatewayBaseUrl, alternateServer.serverInstanceId, {
+      load: 0.1,
+      healthy: true,
+      acceptingNewSessions: true,
+    });
+    await delay(50);
+
+    adaptiveRecall = await sendGatewayMessage(gatewayBaseUrl, {
+      method: "tools/call",
+      sessionId,
+      params: {
+        clientId: ADAPTIVE_CLIENT_ID,
+        runtimeHints: {
+          replaySafe: true,
+          readOnly: true,
+          externalState: true,
+        },
+        name: "memory_recall",
+        arguments: {
+          namespace,
+          key,
+        },
+      },
+    });
+  }
+
   await setInstanceHealth(gatewayBaseUrl, initialized.serverInstanceId, {
     load: 0.99,
     healthy: false,
@@ -123,11 +177,29 @@ export async function driveMemoryRemoteProof({
 
   return {
     checks: {
-      stickyRouting: initialized.serverInstanceId === stickyRecall.serverInstanceId,
+      stickyRouting: adaptivePlacement || initialized.serverInstanceId === stickyRecall.serverInstanceId,
+      adaptivePlacement:
+        !adaptivePlacement ||
+        initialized.runtimeMode === "stateless" &&
+          initialized.runtimeRecommendation?.adaptivePlacement?.applied === true &&
+          initialized.runtimeRecommendation?.adaptivePlacement?.runtimeModeSource === "adaptive-classifier",
+      adaptiveDynamicRouting:
+        !adaptivePlacement ||
+        (adaptiveRecall &&
+          initialized.serverInstanceId !== adaptiveRecall.serverInstanceId &&
+          adaptiveRecall.runtimeMode === "stateless" &&
+          adaptiveRecall.runtimeRecommendation?.adaptivePlacement?.runtimeModeSource === "existing-session"),
+      adaptiveTelemetry:
+        !adaptivePlacement ||
+        observability.summary.totalAdaptivePlacements === 1 &&
+          observability.summary.totalAdaptivePlacementStateless === 1 &&
+          observability.summary.totalAdaptivePlacementFallbacks === 0 &&
+          observability.summary.totalAdaptivePlacementMismatches === 0,
       unhealthyReassignment:
         initialized.serverInstanceId !== reassignedRecall.serverInstanceId,
       memoryVisibleThroughMcp:
         stickyRecall.result.structuredContent.value === value &&
+        (!adaptivePlacement || adaptiveRecall?.result.structuredContent.value === value) &&
         reassignedRecall.result.structuredContent.value === value,
       memoryVisibleOnSharedStore:
         storeSnapshot.some(
@@ -159,6 +231,8 @@ export async function driveMemoryRemoteProof({
       rememberResult: rememberResult.result.structuredContent,
       stickyRecallResult: stickyRecall.result.structuredContent,
       stickyServerInstanceId: stickyRecall.serverInstanceId,
+      adaptiveRecallResult: adaptiveRecall?.result.structuredContent ?? null,
+      adaptiveRecallServerInstanceId: adaptiveRecall?.serverInstanceId ?? null,
       listResult: listResult.result.structuredContent,
       reassignedRecallResult: reassignedRecall.result.structuredContent,
       reassignedServerInstanceId: reassignedRecall.serverInstanceId,
@@ -169,10 +243,12 @@ export async function driveMemoryRemoteProof({
 function createDefaultStoreFile() {
   const rootDir = resolve(process.cwd(), "validation-artifacts", "memory-multicontainer");
   mkdirSync(rootDir, { recursive: true });
-  return resolve(rootDir, "memory-store.json");
+  const storeFile = resolve(rootDir, "memory-store.json");
+  createFileBackedMemoryValidationStore({ filePath: storeFile });
+  return storeFile;
 }
 
-async function startLocalTopology({ storeFile, processes }) {
+async function startLocalTopology({ storeFile, processes, adaptivePlacement = false }) {
   const cwd = resolve(process.cwd());
   const serverScript = resolve(cwd, "validation/memory/remote-memory-server.js");
   const gatewayScript = resolve(cwd, "validation/multicontainer/remote-gateway.js");
@@ -214,6 +290,8 @@ async function startLocalTopology({ storeFile, processes }) {
         "mem-a": `http://127.0.0.1:${readyA.port}`,
         "mem-b": `http://127.0.0.1:${readyB.port}`,
       }),
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: adaptivePlacement ? "true" : "false",
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: adaptivePlacement ? ADAPTIVE_CLIENT_ID : "",
     },
   });
   processes.push(gateway);
@@ -239,6 +317,28 @@ async function connectToExternalTopology({ gatewayBaseUrl, remoteServerBaseUrls,
     })),
     storeFile,
   };
+}
+
+async function waitForTopology(topology) {
+  await Promise.all([
+    waitForEndpoint(`${topology.gatewayBaseUrl}/health`),
+    ...topology.remoteServers.map((server) => waitForEndpoint(`${server.baseUrl}/health`)),
+  ]);
+}
+
+async function waitForEndpoint(url, { attempts = 120, delayMs = 500 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fetchJson(url);
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(delayMs);
+    }
+  }
+
+  throw lastError ?? new Error(`Endpoint did not become ready: ${url}`);
 }
 
 async function collectRemoteMemorySnapshots(remoteServers) {
