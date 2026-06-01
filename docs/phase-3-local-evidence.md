@@ -21,8 +21,9 @@ sustained, remote-process, and shared-Redis validations. It is not closed for
 production rollout until the external canary gate below runs against a live
 gateway fleet.
 
-The remaining Phase 3 rollout gate is external: run a production-like canary
-with real traffic, compare the Phase 2 baseline against adaptive-placement
+The remaining Phase 3 rollout gate is external: run the
+[`phase-3-external-canary-runbook.md`](./phase-3-external-canary-runbook.md)
+against real traffic, compare the Phase 2 baseline against adaptive-placement
 traffic, and widen the allowlist only while mismatches remain zero and fallback
 reasons are explained.
 
@@ -55,16 +56,18 @@ reasons are explained.
 
 Before making adaptive placement broader than an internal allowlist:
 
-1. Run the Phase 2 production gates and capture baseline request, error,
+1. Run the
+   [`phase-3-external-canary-runbook.md`](./phase-3-external-canary-runbook.md).
+2. Run the Phase 2 production gates and capture baseline request, error,
    routing, fallback, and memory behavior.
-2. Enable adaptive placement only for a small internal canary allowlist.
-3. Monitor `/observability` for:
+3. Enable adaptive placement only for a small internal canary allowlist.
+4. Monitor `/observability` for:
    - `summary.totalAdaptivePlacementMismatches === 0`;
    - no invalid-classifier fallback events;
    - fallback events explained by `canary-not-allowed`, `explicit`, or
      `existing-session`;
    - no increase in downstream application errors versus the Phase 2 baseline.
-4. Widen the allowlist only while the mismatch count remains zero and all
+5. Widen the allowlist only while the mismatch count remains zero and all
    fallback reasons are expected.
 
 ## Not Claimed

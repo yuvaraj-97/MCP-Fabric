@@ -8,6 +8,8 @@ The local evidence ledger is maintained in
 [`phase-3-local-evidence.md`](./phase-3-local-evidence.md). It records which
 Phase 3 gates are complete locally and keeps the external staging canary as the
 remaining rollout gate before any wider production claim.
+The external canary procedure and report template are maintained in
+[`phase-3-external-canary-runbook.md`](./phase-3-external-canary-runbook.md).
 
 ## Operator Gate
 
@@ -339,21 +341,25 @@ reinitialized. New sessions revert to Phase 2 sticky default.
 
 ### Canary Procedure
 
-1. Keep adaptive placement disabled and run the Phase 2 production gates to
+1. Follow
+   [`phase-3-external-canary-runbook.md`](./phase-3-external-canary-runbook.md)
+   for the evidence directory, snapshots, thresholds, rollback triggers, and
+   final report.
+2. Keep adaptive placement disabled and run the Phase 2 production gates to
    confirm the baseline is healthy.
-2. Enable adaptive placement with a small allowlist of internal canary clients:
+3. Enable adaptive placement with a small allowlist of internal canary clients:
 
    ```sh
    MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED=true
    MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST="canary-client-1,canary-client-2"
    ```
 
-3. Run `npm run validate:adaptive-placement` before sending production traffic
+4. Run `npm run validate:adaptive-placement` before sending production traffic
    through the canary.
-4. Run `npm run validate:adaptive-placement:load` before widening the canary to
+5. Run `npm run validate:adaptive-placement:load` before widening the canary to
    a larger internal client set.
-5. Monitor `/observability` for the counters listed above.
-6. Widen the allowlist only while mismatches remain zero and fallbacks are
+6. Monitor `/observability` for the counters listed above.
+7. Widen the allowlist only while mismatches remain zero and fallbacks are
    explained by expected sources.
 
 ### Full Test Suite
