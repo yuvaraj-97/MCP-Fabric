@@ -5,8 +5,8 @@
   "description": "Session-aware, transport-agnostic infrastructure for MCP-compatible deployments.",
   "type": "module",
   "scripts": {
-    "test": "node tests/run-tests.js",
-    "test:unit": "node tests/run-tests.js",
+    "test": "node --expose-gc tests/run-tests.js",
+    "test:unit": "node --expose-gc tests/run-tests.js",
     "test:integration": "node --test tests/transport-agnostic/stdio-http-parity.test.js tests/failover/http-sse-gateway.test.js",
     "demo": "node apps/local-dashboard/server.js",
     "demo:stdio": "node examples/stdio-server/server.js",
@@ -22,6 +22,7 @@
     "validate:memory": "node validation/memory/run-validation.js",
     "validate:memory:multicontainer": "node validation/memory/run-multicontainer-proof.js",
     "validate:adaptive-placement": "node validation/adaptive-placement/run-validation.js",
+    "validate:adaptive-placement:load": "node --expose-gc validation/adaptive-placement/run-load-validation.js",
     "validate:shared-redis": "node validation/shared-redis/run-proof.js",
     "validate:burst-memory": "node --expose-gc validation/burst-memory/run-proof.js",
     "check": "npm test"
