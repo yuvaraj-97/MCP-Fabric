@@ -13,6 +13,8 @@ import "./validation/git-multicontainer.test.js";
 import "./validation/memory-validation.test.js";
 import "./validation/memory-multicontainer.test.js";
 import "./validation/burst-memory-validation.test.js";
+import "./validation/adaptive-placement-validation.test.js";
+import "./validation/adaptive-placement-canary.test.js";
 import "./transport-agnostic/mcp-application-server.test.js";
 import "./transport-agnostic/mcp-custom-methods.test.js";
 import "./transport-agnostic/stdio-transport.test.js";

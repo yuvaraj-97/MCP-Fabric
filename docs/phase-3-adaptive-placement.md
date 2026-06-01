@@ -148,9 +148,107 @@ For in-process controllers, `setAdaptivePlacementEnabled(false)` restores Phase
 2 routing behavior without recreating the controller. Existing sessions keep
 their stored mode until they expire or are reinitialized.
 
-## Validation
+## Canary Validation
 
-Required commands for this tracer bullet:
+The Phase 3 canary validation harness exercises the real gateway/controller
+flow. It proves an allowlisted client receives classifier-driven placement, a
+non-allowlisted client falls back to Phase 2 sticky routing, an explicit
+override wins, and quality counters report zero mismatches.
+
+```sh
+npm run validate:adaptive-placement
+```
+
+The validation harness:
+
+1. Creates a gateway controller with `adaptivePlacementEnabled: true` and an
+   allowlist containing `adaptive-canary-client`.
+2. Sends a read-only, replay-safe initialize request from the canary client and
+   verifies `runtimeMode=stateless`, `applied=true`, and
+   `runtimeModeSource=adaptive-classifier`.
+3. Sends the same request shape from a non-allowlisted client and verifies
+   Phase 2 sticky fallback with `runtimeModeSource=canary-not-allowed`.
+4. Sends an explicit `runtimeMode=sticky` request from the canary client and
+   verifies the explicit override wins.
+5. Verifies `totalAdaptivePlacementMismatches` remains `0` and fallback events
+   are explainable.
+
+### Pre-Canary Baseline
+
+Before enabling Phase 3 in production, establish a baseline with Phase 2:
+
+1. Record `totalRequests` and the absence of any `adaptive.placement.*` events.
+2. Confirm all sessions use Phase 2 routing (sticky default).
+3. Ensure no observability signals indicate placement drift.
+
+### Canary Thresholds
+
+During a canary rollout, monitor:
+
+- `summary.totalAdaptivePlacementMismatches` remains `0`.
+- No `adaptive.placement.fallback` events with
+  `runtimeModeSource=invalid-classifier-recommendation`.
+- Fallback events are explained by expected sources such as
+  `canary-not-allowed`, `explicit`, or `existing-session`.
+- Route and downstream application error rates do not increase compared with
+  the Phase 2 baseline.
+- `summary.totalAdaptivePlacementStateless` and
+  `summary.totalAdaptivePlacementSticky` move only for clients in the current
+  allowlist.
+
+Any non-zero mismatch count is a rollback trigger until the classifier input,
+application behavior, or placement contract is understood.
+
+### Rollback
+
+To rollback Phase 3 adaptive placement:
+
+```sh
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED=false
+```
+
+Or in-process:
+
+```javascript
+controller.setAdaptivePlacementEnabled(false);
+```
+
+Existing sessions keep their stored mode until they expire or are
+reinitialized. New sessions revert to Phase 2 sticky default.
+
+### Canary Procedure
+
+1. Keep adaptive placement disabled and run the Phase 2 production gates to
+   confirm the baseline is healthy.
+2. Enable adaptive placement with a small allowlist of internal canary clients:
+
+   ```sh
+   MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED=true
+   MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST="canary-client-1,canary-client-2"
+   ```
+
+3. Run `npm run validate:adaptive-placement` before sending production traffic
+   through the canary.
+4. Monitor `/observability` for the counters listed above.
+5. Widen the allowlist only while mismatches remain zero and fallbacks are
+   explained by expected sources.
+
+### Full Test Suite
+
+Run the adaptive placement validation harness:
+
+```sh
+npm run validate:adaptive-placement
+```
+
+Run the canary test suite:
+
+```sh
+node --test tests/validation/adaptive-placement-canary.test.js
+```
+
+Run the existing unit and integration tests to ensure Phase 3 does not
+regress Phase 2 behavior:
 
 ```sh
 node --test tests/gateway/operator-config.test.js tests/failover/http-sse-gateway-controller.test.js
