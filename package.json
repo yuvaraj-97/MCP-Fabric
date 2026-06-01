@@ -20,6 +20,7 @@
     "validate:filesystem:openai": "node validation/filesystem/run-openai-conversation.js",
     "validate:git": "node validation/git/run-validation.js",
     "validate:git:multicontainer": "node validation/git/run-multicontainer-proof.js",
+    "validate:git:multicontainer:adaptive": "MCP_GIT_MULTICONTAINER_ADAPTIVE_PLACEMENT=1 node validation/git/run-multicontainer-proof.js",
     "validate:memory": "node validation/memory/run-validation.js",
     "validate:memory:multicontainer": "node validation/memory/run-multicontainer-proof.js",
     "validate:memory:multicontainer:adaptive": "MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT=1 node validation/memory/run-multicontainer-proof.js",

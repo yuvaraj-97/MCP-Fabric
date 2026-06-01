@@ -11,6 +11,7 @@ import "./validation/filesystem-conversation.test.js";
 import "./validation/filesystem-openai-conversation.test.js";
 import "./validation/git-validation.test.js";
 import "./validation/git-multicontainer.test.js";
+import "./validation/git-multicontainer-adaptive.test.js";
 import "./validation/memory-validation.test.js";
 import "./validation/memory-multicontainer.test.js";
 import "./validation/memory-multicontainer-adaptive.test.js";

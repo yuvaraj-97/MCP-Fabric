@@ -71,6 +71,8 @@ npm run validate:filesystem:multicontainer
 npm run validate:git:multicontainer
 npm run validate:memory:multicontainer
 npm run validate:filesystem:multicontainer:adaptive
+npm run validate:git:multicontainer:adaptive
+npm run validate:memory:multicontainer:adaptive
 ```
 
 ```sh

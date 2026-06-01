@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import {
   createGitValidationWorkspace,
   describeGitValidationFile,
+  initializeGitValidationWorkspace,
   snapshotGitValidationWorkspace,
 } from "./workspace.js";
 import { delay, fetchJson } from "../multicontainer/http-utils.js";
@@ -11,28 +12,39 @@ import { allocatePort, spawnNodeProcess } from "../multicontainer/process-utils.
 
 const DEFAULT_RELATIVE_PATH = "notes/git-multicontainer-change.txt";
 const DEFAULT_CONTENT = "git multi-container proof works";
+const ADAPTIVE_CLIENT_ID = "git-multicontainer-adaptive-client";
 
 export async function runGitMulticontainerProof({
   gatewayBaseUrl,
   remoteServerBaseUrls,
   rootDir = createGitValidationWorkspace("git-multicontainer"),
   cleanup = false,
+  adaptivePlacement = false,
+  initializeRoot = false,
 } = {}) {
   const processes = [];
 
   try {
+    if (initializeRoot) {
+      initializeGitValidationWorkspace(rootDir);
+    }
+
     const topology = gatewayBaseUrl
       ? await connectToExternalTopology({ gatewayBaseUrl, remoteServerBaseUrls })
-      : await startLocalTopology({ rootDir, processes });
+      : await startLocalTopology({ rootDir, processes, adaptivePlacement });
+
+    await waitForTopology(topology);
 
     const report = await driveGitRemoteProof({
       gatewayBaseUrl: topology.gatewayBaseUrl,
       remoteServers: topology.remoteServers,
       rootDir,
+      adaptivePlacement,
     });
+    const ok = Object.values(report.checks).every((check) => check === true);
 
     return {
-      ok: true,
+      ok,
       mode: topology.mode,
       rootDir,
       createdFile: describeGitValidationFile(rootDir, DEFAULT_RELATIVE_PATH),
@@ -53,10 +65,20 @@ export async function driveGitRemoteProof({
   rootDir,
   relativePath = DEFAULT_RELATIVE_PATH,
   content = DEFAULT_CONTENT,
+  adaptivePlacement = false,
 } = {}) {
   const initialized = await sendGatewayMessage(gatewayBaseUrl, {
     method: "initialize",
-    params: { clientId: "git-multicontainer-client" },
+    params: adaptivePlacement
+      ? {
+          clientId: ADAPTIVE_CLIENT_ID,
+          runtimeHints: {
+            replaySafe: true,
+            readOnly: true,
+            externalState: true,
+          },
+        }
+      : { clientId: "git-multicontainer-client" },
   });
   const sessionId = initialized.sessionId;
 
@@ -102,6 +124,45 @@ export async function driveGitRemoteProof({
     },
   });
 
+  let adaptiveRead = null;
+  if (adaptivePlacement) {
+    const alternateServer = remoteServers.find(
+      (server) => server.serverInstanceId !== initialized.serverInstanceId,
+    );
+    if (!alternateServer) {
+      throw new Error("Adaptive multi-container proof requires at least two remote servers");
+    }
+
+    await setInstanceHealth(gatewayBaseUrl, initialized.serverInstanceId, {
+      load: 0.7,
+      healthy: true,
+      acceptingNewSessions: true,
+    });
+    await setInstanceHealth(gatewayBaseUrl, alternateServer.serverInstanceId, {
+      load: 0.1,
+      healthy: true,
+      acceptingNewSessions: true,
+    });
+    await delay(50);
+
+    adaptiveRead = await sendGatewayMessage(gatewayBaseUrl, {
+      method: "tools/call",
+      sessionId,
+      params: {
+        clientId: ADAPTIVE_CLIENT_ID,
+        runtimeHints: {
+          replaySafe: true,
+          readOnly: true,
+          externalState: true,
+        },
+        name: "git_read_file",
+        arguments: {
+          path: relativePath,
+        },
+      },
+    });
+  }
+
   await setInstanceHealth(gatewayBaseUrl, initialized.serverInstanceId, {
     load: 0.99,
     healthy: false,
@@ -136,7 +197,26 @@ export async function driveGitRemoteProof({
 
   return {
     checks: {
-      stickyRouting: initialized.serverInstanceId === stickyDiff.serverInstanceId,
+      // Adaptive mode stores a stateless session, so follow-ups are expected to
+      // route by health/load rather than strict session stickiness.
+      stickyRouting: adaptivePlacement || initialized.serverInstanceId === stickyDiff.serverInstanceId,
+      adaptivePlacement:
+        !adaptivePlacement ||
+        (initialized.runtimeMode === "stateless" &&
+          initialized.runtimeRecommendation?.adaptivePlacement?.applied === true &&
+          initialized.runtimeRecommendation?.adaptivePlacement?.runtimeModeSource === "adaptive-classifier"),
+      adaptiveDynamicRouting:
+        !adaptivePlacement ||
+        (adaptiveRead &&
+          initialized.serverInstanceId !== adaptiveRead.serverInstanceId &&
+          adaptiveRead.runtimeMode === "stateless" &&
+          adaptiveRead.runtimeRecommendation?.adaptivePlacement?.runtimeModeSource === "existing-session"),
+      adaptiveTelemetry:
+        !adaptivePlacement ||
+        (observability.summary.totalAdaptivePlacements === 1 &&
+          observability.summary.totalAdaptivePlacementStateless === 1 &&
+          observability.summary.totalAdaptivePlacementFallbacks === 0 &&
+          observability.summary.totalAdaptivePlacementMismatches === 0),
       unhealthyReassignment:
         initialized.serverInstanceId !== reassignedRead.serverInstanceId,
       artifactVisibleThroughMcp:
@@ -166,6 +246,8 @@ export async function driveGitRemoteProof({
       stageResult: stageResult.result.structuredContent,
       stickyDiffResult: stickyDiff.result.structuredContent,
       stickyServerInstanceId: stickyDiff.serverInstanceId,
+      adaptiveReadResult: adaptiveRead?.result.structuredContent ?? null,
+      adaptiveReadServerInstanceId: adaptiveRead?.serverInstanceId ?? null,
       reassignedReadResult: reassignedRead.result.structuredContent,
       reassignedStatusResult: reassignedStatus.result.structuredContent,
       reassignedServerInstanceId: reassignedRead.serverInstanceId,
@@ -173,7 +255,7 @@ export async function driveGitRemoteProof({
   };
 }
 
-async function startLocalTopology({ rootDir, processes }) {
+async function startLocalTopology({ rootDir, processes, adaptivePlacement = false }) {
   const cwd = resolve(process.cwd());
   const serverScript = resolve(cwd, "validation/git/remote-server.js");
   const gatewayScript = resolve(cwd, "validation/multicontainer/remote-gateway.js");
@@ -215,6 +297,8 @@ async function startLocalTopology({ rootDir, processes }) {
         "git-a": `http://127.0.0.1:${readyA.port}`,
         "git-b": `http://127.0.0.1:${readyB.port}`,
       }),
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: adaptivePlacement ? "true" : "false",
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: adaptivePlacement ? ADAPTIVE_CLIENT_ID : "",
     },
   });
   processes.push(gateway);
@@ -239,6 +323,30 @@ async function connectToExternalTopology({ gatewayBaseUrl, remoteServerBaseUrls 
       baseUrl: baseUrl.replace(/\/+$/, ""),
     })),
   };
+}
+
+async function waitForTopology(topology) {
+  await waitForHealthyUrl(`${topology.gatewayBaseUrl}/health`);
+
+  for (const server of topology.remoteServers) {
+    await waitForHealthyUrl(`${server.baseUrl}/health`);
+  }
+}
+
+async function waitForHealthyUrl(url) {
+  let lastError;
+
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      await fetchJson(url);
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(500);
+    }
+  }
+
+  throw lastError ?? new Error(`Timed out waiting for ${url}`);
 }
 
 async function collectRemoteWorkspaceSnapshots(remoteServers) {

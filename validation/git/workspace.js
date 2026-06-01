@@ -13,6 +13,12 @@ import { join, relative, resolve } from "node:path";
 
 export function createGitValidationWorkspace(name) {
   const rootDir = resolve(process.cwd(), "validation-artifacts", `${name}-${randomUUID()}`);
+  initializeGitValidationWorkspace(rootDir);
+
+  return rootDir;
+}
+
+export function initializeGitValidationWorkspace(rootDir) {
   rmSync(rootDir, { recursive: true, force: true });
   mkdirSync(rootDir, { recursive: true });
 
