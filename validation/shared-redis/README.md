@@ -45,6 +45,12 @@ npm run validate:shared-redis
 - the reused session keeps the same target MCP server instance
 - `/sessions` and `/observability` can be inspected on both gateways
 
+The unit-level shared-registry tests also cover the Phase 3 adaptive placement
+case. When gateway A creates an adaptive stateless session, gateway B must read
+the stored `runtimeMode` and `runtimeModeSource` from the shared registry. The
+follow-up may reassign because the stored mode is stateless, but it must not
+turn into a new adaptive fallback or mismatch.
+
 ## Useful Endpoints
 
 - gateway A sessions: `http://127.0.0.1:4200/sessions`
