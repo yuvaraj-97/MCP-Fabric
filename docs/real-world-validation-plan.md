@@ -439,7 +439,8 @@ This phase is successful if:
 If the real-world validation succeeds, the next build steps should be:
 
 1. run an external production-like adaptive placement canary against filesystem,
-   git, and memory validation targets;
+   git, and memory validation targets using
+   [`phase-3-external-canary-runbook.md`](./phase-3-external-canary-runbook.md);
 2. compare the external canary with the local Phase 3 evidence ledger in
    [`phase-3-local-evidence.md`](./phase-3-local-evidence.md);
 3. package the gateway as a clearer standalone runtime;
