@@ -438,14 +438,13 @@ This phase is successful if:
 
 If the real-world validation succeeds, the next build steps should be:
 
-1. run production-like adaptive placement canaries against filesystem, git, and
-   memory validation targets;
-2. validate cross-gateway session reuse with adaptive placement enabled;
-3. capture classifier confidence, drift, fallback reasons, and mismatch
-   counters as operator-facing evidence;
-4. package the gateway as a clearer standalone runtime;
-5. support external shared state backends beyond local files;
-6. document deployment alternatives such as ALB/NGINX versus the custom
+1. run an external production-like adaptive placement canary against filesystem,
+   git, and memory validation targets;
+2. compare the external canary with the local Phase 3 evidence ledger in
+   [`phase-3-local-evidence.md`](./phase-3-local-evidence.md);
+3. package the gateway as a clearer standalone runtime;
+4. support external shared state backends beyond local files;
+5. document deployment alternatives such as ALB/NGINX versus the custom
    gateway path
 
 Phase 2 production gates are complete. Phase 3 adaptive placement exists behind

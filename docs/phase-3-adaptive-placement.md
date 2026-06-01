@@ -4,6 +4,11 @@ Phase 3 is a guarded tracer bullet for automatic placement. It lets classifier
 recommendations influence routing only when an operator explicitly enables the
 gate.
 
+The local evidence ledger is maintained in
+[`phase-3-local-evidence.md`](./phase-3-local-evidence.md). It records which
+Phase 3 gates are complete locally and keeps the external staging canary as the
+remaining rollout gate before any wider production claim.
+
 ## Operator Gate
 
 Adaptive placement defaults off:
