@@ -248,6 +248,43 @@ This proof is the first Stage 6 evidence that classifier quality remains
 consistent across the existing filesystem, git, and memory real-workload
 targets, not only synthetic controller traffic.
 
+## Local Sustained Canary Validation
+
+The local sustained validation keeps one set of in-process filesystem, git, and
+memory validation controllers alive, repeats the real-workload proof, and
+aggregates quality signals over a configurable canary window:
+
+```sh
+npm run validate:adaptive-placement:sustained
+```
+
+By default, it runs five iterations. Override the window with:
+
+```sh
+MCP_ADAPTIVE_SUSTAINED_ITERATIONS=20 \
+MCP_ADAPTIVE_SUSTAINED_DELAY_MS=1000 \
+npm run validate:adaptive-placement:sustained
+```
+
+For longer or noisier canary windows, operators can tune pass thresholds:
+
+```sh
+MCP_ADAPTIVE_SUSTAINED_MAX_FALLBACKS=0 \
+MCP_ADAPTIVE_SUSTAINED_MAX_MISMATCHES=0 \
+MCP_ADAPTIVE_SUSTAINED_MIN_HIGH_CONFIDENCE_RATIO=1 \
+MCP_ADAPTIVE_SUSTAINED_MIN_STATELESS_RATIO=1 \
+MCP_ADAPTIVE_SUSTAINED_MIN_DRIFT_RATIO=1 \
+MCP_ADAPTIVE_SUSTAINED_MIN_REROUTE_RATIO=1 \
+npm run validate:adaptive-placement:sustained
+```
+
+The default local report requires every filesystem, git, and memory workload
+execution to produce a high-confidence stateless recommendation, apply adaptive
+placement, drift from the Phase 2 sticky default, dynamically reroute the
+follow-up request, and keep fallback and mismatch counts at zero. This is local
+evidence, not a substitute for running an external staging canary against a live
+gateway fleet.
+
 ### Pre-Canary Baseline
 
 Before enabling Phase 3 in production, establish a baseline with Phase 2:
@@ -334,6 +371,12 @@ Run the real-workload telemetry proof:
 
 ```sh
 npm run validate:adaptive-placement:real-workloads
+```
+
+Run the sustained real-workload canary proof:
+
+```sh
+npm run validate:adaptive-placement:sustained
 ```
 
 Run the existing unit and integration tests to ensure Phase 3 does not

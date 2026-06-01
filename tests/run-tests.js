@@ -17,6 +17,7 @@ import "./validation/adaptive-placement-validation.test.js";
 import "./validation/adaptive-placement-canary.test.js";
 import "./validation/adaptive-placement-load.test.js";
 import "./validation/adaptive-placement-real-workload.test.js";
+import "./validation/adaptive-placement-sustained.test.js";
 import "./transport-agnostic/mcp-application-server.test.js";
 import "./transport-agnostic/mcp-custom-methods.test.js";
 import "./transport-agnostic/stdio-transport.test.js";
