@@ -60,6 +60,10 @@ instance.
 ## Placement Semantics
 
 Phase 3 supports only the implemented `stateless` and `sticky` modes.
+The recovery contract for those modes is documented in
+[`mode-recovery-matrix.md`](./mode-recovery-matrix.md). Reserved modes such as
+`soft_sticky`, `pinned`, and `hybrid` must not be treated as implemented
+operator behavior.
 
 | Request shape | Adaptive flag | Routing mode source |
 | --- | --- | --- |
