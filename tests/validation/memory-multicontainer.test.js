@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { runMemoryMulticontainerProof } from "../../validation/memory/multicontainer-harness.js";
 
 test("memory multi-container proof preserves continuity across remote reassignment", async (t) => {
+  const rootDir = mkdtempSync(join(tmpdir(), "memory-multicontainer-test-"));
   let report;
   try {
-    report = await runMemoryMulticontainerProof({ cleanup: true });
+    report = await runMemoryMulticontainerProof({
+      storeFile: join(rootDir, "memory-store.json"),
+      cleanup: true,
+    });
   } catch (error) {
     if (error?.code === "EPERM" && error?.syscall === "listen") {
       t.skip("sandbox blocks local listeners for remote-process proof");

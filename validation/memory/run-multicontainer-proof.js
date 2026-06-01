@@ -11,10 +11,20 @@ const report = await runMemoryMulticontainerProof({
   cleanup:
     process.env.MCP_MEMORY_MULTICONTAINER_KEEP_ARTIFACTS !== "1" &&
     process.env.MCP_MULTICONTAINER_KEEP_ARTIFACTS !== "1",
+  adaptivePlacement:
+    process.env.MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT === "1" ||
+    process.env.MCP_MEMORY_MULTICONTAINER_ADAPTIVE_PLACEMENT === "true" ||
+    process.env.MCP_MULTICONTAINER_ADAPTIVE_PLACEMENT === "1" ||
+    process.env.MCP_MULTICONTAINER_ADAPTIVE_PLACEMENT === "true",
 });
 
 console.log("Memory multi-container proof completed.");
 console.log(JSON.stringify(report, null, 2));
+
+if (!report.ok || Object.values(report.checks).some(check => !check)) {
+  console.error("Memory multi-container proof checks failed!");
+  process.exit(1);
+}
 
 function parseRemoteServerBaseUrls(value) {
   if (!value) {
