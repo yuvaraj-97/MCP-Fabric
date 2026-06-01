@@ -77,13 +77,16 @@ immediately.
 
    Phase 2 is implemented as diagnostics only: recommendations are returned in
    gateway responses and recorded in observability, but they do not alter
-   routing behavior.
+   routing behavior while the adaptive placement gate is disabled.
 
-   Phase 3 begins with a guarded tracer bullet documented in
+   Phase 3 is implemented as a guarded tracer bullet documented in
    [`phase-3-adaptive-placement.md`](./phase-3-adaptive-placement.md): adaptive
    placement defaults off, explicit overrides win, existing sessions keep their
    stored mode, and only new sessions without an explicit mode may use the
    classifier recommendation as the routing mode.
+
+   Phase 4 remains deferred until production-like telemetry validates adaptive
+   placement quality across real workloads.
 
 9. **Classifier signal sources**
 
@@ -125,7 +128,7 @@ immediately.
     drain, load, and autoscaler events or hooks, but does not directly provision
     infrastructure in the next phase.
 
-    Before production claims or automatic placement, require:
+    Before production claims or wider automatic placement, require:
 
     - Redis-backed multi-gateway validation;
     - reconnect and failover tests;

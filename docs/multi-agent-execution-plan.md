@@ -190,21 +190,40 @@ Commit checkpoint:
 
 Lead: Codex, with Claude and Antigravity review.
 
-Do not start this stage until recommendation-only telemetry has been validated
-against real workloads.
+Status: started as a guarded Phase 3 tracer bullet. Adaptive placement is
+implemented behind a default-off operator gate, with canary allowlists,
+runtime-mode-source metadata, quality counters, validation, and rollback
+guidance. It is not a general production default.
 
 Required gates:
 
-- measured recommendation quality;
+- measured recommendation quality before widening rollout;
 - documented mode recovery matrix;
 - operator flag for adaptive placement;
 - rollback path;
-- observability showing why placement happened.
+- observability showing why placement happened;
+- production-like telemetry before Phase 4 self-optimization.
 
 Commit checkpoint:
 
 - commit only after implementation, tests, docs, and rollout guidance are
   aligned.
+
+### Stage 6: Production-like telemetry for Phase 4
+
+Lead: Codex, with Claude for architecture review and Antigravity for
+operational-risk review.
+
+Do not start self-optimization until adaptive placement quality has been
+measured against real workloads and cross-gateway topologies.
+
+Required gates:
+
+- sustained canary runs for filesystem, git, and memory validation targets;
+- mismatch rate remains zero during the canary window;
+- fallback reasons remain explainable;
+- cross-gateway session reuse is validated with adaptive placement enabled;
+- classifier confidence and drift are captured in operator-facing evidence.
 
 ## Handoff Format
 
