@@ -47,6 +47,98 @@ test("two gateway controllers can share session affinity through a redis-backed 
   );
 });
 
+test("two gateway controllers preserve adaptive placement metadata through a shared registry", async () => {
+  const client = createFakeRedisClient();
+  const registryA = new RedisSessionRegistry({ client, key: "mcp:test:adaptive-sessions" });
+  const registryB = new RedisSessionRegistry({ client, key: "mcp:test:adaptive-sessions" });
+  const serverInstances = [
+    { serverInstanceId: "server-a", load: 0.1, healthy: true },
+    { serverInstanceId: "server-b", load: 0.2, healthy: true },
+  ];
+
+  const firstGateway = createHttpSseGatewayController({
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+      adaptivePlacementClientAllowlist: ["shared-adaptive-client"],
+    },
+    serverInstances,
+    sessionRegistry: registryA,
+  });
+  const secondGateway = createHttpSseGatewayController({
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+      adaptivePlacementClientAllowlist: ["shared-adaptive-client"],
+    },
+    serverInstances,
+    sessionRegistry: registryB,
+  });
+
+  const initialized = await firstGateway.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "shared-adaptive-session",
+    params: {
+      clientId: "shared-adaptive-client",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "stateless");
+  assert.equal(
+    initialized.runtimeRecommendation.adaptivePlacement.runtimeModeSource,
+    "adaptive-classifier",
+  );
+  assert.equal(
+    (await registryA.get(initialized.sessionId)).metadata.runtimeModeSource,
+    "adaptive-classifier",
+  );
+
+  secondGateway.upsertInstance({
+    serverInstanceId: "server-a",
+    load: 0.7,
+    healthy: true,
+    acceptingNewSessions: true,
+  });
+  secondGateway.upsertInstance({
+    serverInstanceId: "server-b",
+    load: 0.1,
+    healthy: true,
+    acceptingNewSessions: true,
+  });
+
+  const echoed = await secondGateway.handleGatewayMessage({
+    method: "echo",
+    sessionId: initialized.sessionId,
+    params: {
+      clientId: "shared-adaptive-client",
+      message: "across adaptive gateways",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(echoed.runtimeMode, "stateless");
+  assert.equal(echoed.reusedExistingSession, false);
+  assert.equal(echoed.recovery.action, "reassigned-and-rehydrated");
+  assert.equal(
+    echoed.runtimeRecommendation.adaptivePlacement.runtimeModeSource,
+    "existing-session",
+  );
+  assert.equal(
+    (await registryB.get(initialized.sessionId)).metadata.runtimeModeSource,
+    "adaptive-classifier",
+  );
+  const observability = secondGateway.describeObservability();
+  assert.equal(observability.summary.totalAdaptivePlacementFallbacks, 0);
+  assert.equal(observability.summary.totalAdaptivePlacementMismatches, 0);
+});
+
 function createFakeRedisClient() {
   const store = new Map();
   return {

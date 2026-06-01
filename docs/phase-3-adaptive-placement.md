@@ -211,6 +211,15 @@ MCP_ADAPTIVE_LOAD_MAX_RETAINED_HEAP_BYTES=67108864 \
 npm run validate:adaptive-placement:load
 ```
 
+## Cross-Gateway Shared Registry Behavior
+
+When adaptive placement stores `runtimeMode=stateless` in a durable registry,
+another gateway process must preserve that stored mode and source metadata on
+follow-up requests. The follow-up may route to a different healthy instance
+because the stored mode is stateless, but session metadata must continue to show
+the original `runtimeModeSource=adaptive-classifier`. The second gateway must
+not count that follow-up as a new adaptive placement fallback or mismatch.
+
 ### Pre-Canary Baseline
 
 Before enabling Phase 3 in production, establish a baseline with Phase 2:
