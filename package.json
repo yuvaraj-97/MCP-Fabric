@@ -15,6 +15,7 @@
     "demo:load:local": "node examples/multi-server-load-balanced-demo/load-generator.js http://127.0.0.1:3001 25 100",
     "validate:filesystem": "node validation/filesystem/run-validation.js",
     "validate:filesystem:multicontainer": "node validation/multicontainer/run-filesystem-proof.js",
+    "validate:filesystem:multicontainer:adaptive": "MCP_MULTICONTAINER_ADAPTIVE_PLACEMENT=1 node validation/multicontainer/run-filesystem-proof.js",
     "validate:filesystem:conversation": "node validation/filesystem/run-conversation.js",
     "validate:filesystem:openai": "node validation/filesystem/run-openai-conversation.js",
     "validate:git": "node validation/git/run-validation.js",

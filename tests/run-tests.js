@@ -6,6 +6,7 @@ import "./session-routing/file-session-registry.test.js";
 import "./session-routing/redis-session-registry.test.js";
 import "./session-routing/load-router.test.js";
 import "./validation/filesystem-validation.test.js";
+import "./validation/filesystem-multicontainer-adaptive.test.js";
 import "./validation/filesystem-conversation.test.js";
 import "./validation/filesystem-openai-conversation.test.js";
 import "./validation/git-validation.test.js";

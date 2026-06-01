@@ -379,6 +379,12 @@ Run the sustained real-workload canary proof:
 npm run validate:adaptive-placement:sustained
 ```
 
+Run the remote-process filesystem proof with adaptive placement enabled:
+
+```sh
+npm run validate:filesystem:multicontainer:adaptive
+```
+
 Run the existing unit and integration tests to ensure Phase 3 does not
 regress Phase 2 behavior:
 
