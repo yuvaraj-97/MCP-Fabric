@@ -1,12 +1,13 @@
 # Phase 2 Validation And Production Gates
 
 This document records the validation plan for Phase 2 runtime-classifier
-diagnostics and the gates that must pass before any Phase 3 adaptive placement
-work begins.
+diagnostics and the gates that had to pass before the Phase 3 adaptive
+placement tracer bullet began.
 
 Phase 2 remains recommendation-only:
 
-- classifier output must never change routing;
+- classifier output must never change routing while the Phase 3 adaptive
+  placement gate is disabled;
 - explicit `runtimeMode` remains the placement input;
 - malformed classifier hints must not fail requests;
 - recommendation drift must be observable.
@@ -76,7 +77,13 @@ the same commands in an environment that permits local ports and containers.
 
 ## Recommendation Drift Monitoring
 
-During Phase 2, operators should monitor:
+During Phase 2, operators should monitor recommendation drift as a diagnostic
+signal. In Phase 3, drift is expected for allowlisted adaptive-placement
+traffic when the classifier safely chooses a mode other than the Phase 2 sticky
+default; operators should evaluate Phase 3 drift together with adaptive
+placement counters and mismatch events.
+
+Phase 2 operators should monitor:
 
 - `runtime.recommendation` events;
 - `summary.totalRuntimeRecommendations`;
@@ -95,9 +102,14 @@ Alert-worthy conditions:
 - recommendations for `stateless` on workloads that later require rehydration;
 - missing recommendation events on gateway requests.
 
+In Phase 3 canaries, alert on drift only when it is unexpected for the current
+allowlist, accompanied by `totalAdaptivePlacementMismatches`, or paired with
+unexplained fallback or downstream error increases.
+
 ## Production Gate Checklist
 
-Before Phase 3 adaptive placement can begin:
+These gates were required before starting the Phase 3 adaptive placement
+tracer bullet:
 
 - [x] Full unit and integration test suite is green.
 - [x] Filesystem, git, and memory validations pass through gateway paths.
@@ -109,9 +121,9 @@ Before Phase 3 adaptive placement can begin:
 - [x] Malformed classifier hints are surfaced as diagnostics, not request
       failures.
 - [x] Classifier diagnostic failures preserve routing and are observable.
-- [x] Canary and rollback guidance exists for any future adaptive placement
-      flag.
-- [x] No Phase 3 code consumes `recommendedMode` as a routing input.
+- [x] Canary and rollback guidance exists for the adaptive placement flag.
+- [x] No code consumes `recommendedMode` as a routing input unless the Phase 3
+      adaptive placement flag is enabled for an eligible new session.
 
 ## Redis Outage Proof
 
@@ -151,18 +163,19 @@ gateway/session-registry churn rather than application-owned session caches.
 
 ## Phase 3 Canary And Rollback
 
-Any future adaptive placement implementation must use a separate operator flag
-that defaults off, for example `adaptivePlacementEnabled=false`.
+The Phase 3 adaptive placement implementation uses a separate operator flag,
+`adaptivePlacementEnabled`, that defaults off.
 
-Required rollout sequence:
+Required rollout sequence remains:
 
 - deploy with recommendation-only behavior still active;
 - enable adaptive placement for one non-critical workload or a small client
   allowlist;
-- compare `recommendedMode`, `effectiveRuntimeMode`, rehydration events,
-  rejected requests, and `totalRuntimeOverrideWarnings`;
+- compare `recommendedMode`, `effectiveRuntimeMode`, adaptive placement
+  counters, fallback events, mismatch events, rehydration events, rejected
+  requests, and `totalRuntimeOverrideWarnings`;
 - roll back immediately by disabling the adaptive placement flag if rejected
-  requests, rehydration failures, or registry errors increase;
+  requests, rehydration failures, mismatch events, or registry errors increase;
 - keep explicit `runtimeMode` as an override during the canary.
 
 Rollback must not require a code deploy. Returning the flag to `false` must
@@ -192,6 +205,16 @@ Implemented:
 - gateway response and `/observability` integration;
 - routing-preservation tests.
 
+Phase 3 now additionally implements:
+
+- adaptive placement behind the default-off operator gate;
+- canary client allowlist controls;
+- runtime mode source metadata for placement decisions;
+- adaptive placement quality counters and fallback events;
+- adaptive placement canary validation via `npm run validate:adaptive-placement`;
+- strict canary and rollback guidance in
+  [`phase-3-adaptive-placement.md`](./phase-3-adaptive-placement.md).
+
 Validated in this workspace on 2026-05-31:
 
 - `node --test tests/gateway/runtime-classifier.test.js`;
@@ -213,6 +236,6 @@ Validated in this workspace on 2026-05-31:
   records, peak heap growth of `20901680` bytes, and retained heap growth of
   `342384` bytes under the configured ceilings.
 
-No remaining Phase 2 production gates are open. Phase 3 adaptive placement is
-still a separate future implementation and must remain behind its own operator
-flag.
+No remaining Phase 2 production gates are open. Phase 3 adaptive placement has
+started as a guarded implementation and must remain behind its own operator
+flag until production-like telemetry validates recommendation quality.
