@@ -24,9 +24,25 @@ Run the default local multi-process proof:
 npm run validate:git:multicontainer
 ```
 
+Run the same local multi-process topology with Phase 3 adaptive placement
+enabled for the allowlisted validation client:
+
+```sh
+npm run validate:git:multicontainer:adaptive
+```
+
 Run the same proof as a Docker-based multi-container topology:
 
 ```sh
+docker compose -f validation/git/compose.yaml up --abort-on-container-exit client
+```
+
+Run the Docker topology with adaptive placement enabled:
+
+```sh
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED=true \
+MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST=git-multicontainer-adaptive-client \
+MCP_GIT_MULTICONTAINER_ADAPTIVE_PLACEMENT=1 \
 docker compose -f validation/git/compose.yaml up --abort-on-container-exit client
 ```
 
@@ -51,12 +67,18 @@ server fleet:
 ```sh
 MCP_GIT_MULTICONTAINER_GATEWAY_URL=http://gateway-host:4400 \
 MCP_GIT_MULTICONTAINER_SERVER_URLS=git-a=http://server-a:4301,git-b=http://server-b:4302 \
+MCP_GIT_MULTICONTAINER_ROOT_DIR=/shared/git/workspace \
 npm run validate:git:multicontainer
 ```
 
 Optional:
 
 - `MCP_GIT_MULTICONTAINER_KEEP_ARTIFACTS=1`
+- `MCP_GIT_MULTICONTAINER_ADAPTIVE_PLACEMENT=1`
+- `MCP_GIT_MULTICONTAINER_ROOT_DIR=/shared/git/workspace` when the client can
+  inspect the same mounted workspace as the remote Git servers
+- `MCP_GIT_MULTICONTAINER_INITIALIZE_ROOT=1` to create a clean validation
+  repository at `MCP_GIT_MULTICONTAINER_ROOT_DIR` before the proof starts
 
 ## What The Proof Checks
 
@@ -68,6 +90,17 @@ Optional:
 - unhealthy server state causes reassignment to another remote server
 - the staged git artifact remains visible after reassignment
 - gateway `/sessions` and `/observability` report the lifecycle correctly
+
+When adaptive placement is enabled, the proof also checks:
+
+- initialize is placed with `runtimeMode=stateless` from
+  `runtimeModeSource=adaptive-classifier`
+- a follow-up replay-safe read can route to the lower-load peer via
+  `runtimeModeSource=existing-session`
+- the staged git state remains visible after adaptive routing and unhealthy
+  reassignment because both git servers use the same external workspace
+- adaptive placement counters show one placement, zero fallbacks, and zero
+  mismatches
 
 ## Useful Endpoints
 

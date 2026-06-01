@@ -395,6 +395,12 @@ Run the remote-process memory proof with adaptive placement enabled:
 npm run validate:memory:multicontainer:adaptive
 ```
 
+Run the remote-process git proof with adaptive placement enabled:
+
+```sh
+npm run validate:git:multicontainer:adaptive
+```
+
 Run the shared-Redis cross-gateway proof with adaptive placement enabled
 against an already-running topology:
 

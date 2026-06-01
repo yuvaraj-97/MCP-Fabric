@@ -5,9 +5,13 @@ services:
     volumes:
       - ../../:/workspace
     environment:
+      HOST: "0.0.0.0"
       PORT: "4301"
       ROOT_DIR: /workspace/validation-artifacts/git-multicontainer
       SERVER_INSTANCE_ID: git-a
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /workspace/validation-artifacts/git-multicontainer
     command: ["node", "validation/git/remote-server.js"]
 
   mcp-server-b:
@@ -16,9 +20,13 @@ services:
     volumes:
       - ../../:/workspace
     environment:
+      HOST: "0.0.0.0"
       PORT: "4302"
       ROOT_DIR: /workspace/validation-artifacts/git-multicontainer
       SERVER_INSTANCE_ID: git-b
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /workspace/validation-artifacts/git-multicontainer
     command: ["node", "validation/git/remote-server.js"]
 
   gateway:
@@ -35,6 +43,8 @@ services:
       LOAD_THRESHOLD: "0.8"
       MCP_GATEWAY_ALLOW_PUBLIC_BIND: "1"
       MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT: "0"
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED:-false}
+      MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST: ${MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST:-}
       SERVER_INSTANCES_JSON: >-
         [{"serverInstanceId":"git-a","load":0.12,"healthy":true,"acceptingNewSessions":true},
         {"serverInstanceId":"git-b","load":0.28,"healthy":true,"acceptingNewSessions":true}]
@@ -52,5 +62,8 @@ services:
     environment:
       MCP_GIT_MULTICONTAINER_GATEWAY_URL: http://gateway:4400
       MCP_GIT_MULTICONTAINER_SERVER_URLS: git-a=http://mcp-server-a:4301,git-b=http://mcp-server-b:4302
+      MCP_GIT_MULTICONTAINER_ROOT_DIR: /workspace/validation-artifacts/git-multicontainer
+      MCP_GIT_MULTICONTAINER_INITIALIZE_ROOT: "1"
       MCP_GIT_MULTICONTAINER_KEEP_ARTIFACTS: "1"
+      MCP_GIT_MULTICONTAINER_ADAPTIVE_PLACEMENT: ${MCP_GIT_MULTICONTAINER_ADAPTIVE_PLACEMENT:-0}
     command: ["node", "validation/git/run-multicontainer-proof.js"]
