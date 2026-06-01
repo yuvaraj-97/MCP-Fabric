@@ -231,6 +231,71 @@ test("HTTP/SSE gateway exposes recommendation-only classifier diagnostics", asyn
   );
 });
 
+test("HTTP/SSE gateway exposes adaptive placement response and observability over HTTP", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+  const handler = createGatewayHttpHandler({ controller });
+
+  const initialized = await sendHttpMessage(handler, {
+    method: "initialize",
+    sessionId: "http-adaptive-quality",
+    params: {
+      clientId: "http-adaptive-quality-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "stateless");
+  assert.equal(initialized.runtimeRecommendation.phase, "adaptive-placement");
+  assert.equal(initialized.runtimeRecommendation.adaptivePlacement.applied, true);
+  assert.equal(
+    initialized.runtimeRecommendation.adaptivePlacement.runtimeModeSource,
+    "adaptive-classifier",
+  );
+
+  await sendHttpMessage(handler, {
+    method: "initialize",
+    sessionId: "http-adaptive-fallback",
+    params: {
+      clientId: "http-adaptive-fallback-test",
+      runtimeMode: "sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  const observability = await invokeHttpHandler(handler, {
+    method: "GET",
+    url: "/observability",
+    headers: { host: "127.0.0.1:3000" },
+  });
+  const payload = parseJsonBody(observability);
+  assert.equal(payload.operatorConfig.adaptivePlacementEnabled, true);
+  assert.equal(payload.summary.totalAdaptivePlacementStateless, 1);
+  assert.equal(payload.summary.totalAdaptivePlacementFallbacks, 1);
+  assert.equal(typeof payload.summary.totalAdaptivePlacementMismatches, "number");
+  assert.ok(
+    payload.recentEvents.some(
+      (event) =>
+        event.eventType === "adaptive.placement.fallback" &&
+        event.runtimeModeSource === "explicit" &&
+        event.clientId === "http-adaptive-fallback-test",
+    ),
+  );
+});
+
 test("HTTP/SSE gateway treats malformed runtime hints as diagnostics only", async () => {
   const controller = createHttpSseGatewayController();
   const handler = createGatewayHttpHandler({ controller });

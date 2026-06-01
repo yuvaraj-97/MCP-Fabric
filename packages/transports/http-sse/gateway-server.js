@@ -440,13 +440,17 @@ export function createHttpSseGatewayController({
     async handleGatewayMessage(body) {
       const method = body.method;
       const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
+      let placement;
+      let runtimeRecommendation;
+      let existingSessionRecord;
+      let downstreamApplicationStarted = false;
       try {
         await resolvedSessionRegistry.pruneExpired?.();
         await pruneQueuedDisconnectEvents({
           queuedDisconnectEvents,
           sessionRegistry: resolvedSessionRegistry,
         });
-        const existingSessionRecord = sessionId
+        existingSessionRecord = sessionId
           ? await resolvedSessionRegistry.get(sessionId)
           : undefined;
         const phase2RuntimeMode = resolveRuntimeMode({
@@ -461,7 +465,7 @@ export function createHttpSseGatewayController({
         });
         const clientId = body.params?.clientId ?? existingSessionRecord?.metadata?.clientId ?? "anonymous-client";
         const explicitRuntimeMode = body.runtimeMode ?? body.params?.runtimeMode;
-        const placement = resolvePlacementRuntimeMode({
+        placement = resolvePlacementRuntimeMode({
           adaptivePlacementEnabled,
           adaptivePlacementClientAllowlist,
           clientId,
@@ -471,7 +475,7 @@ export function createHttpSseGatewayController({
           runtimeRecommendation: baseRuntimeRecommendation,
         });
         const runtimeMode = placement.runtimeMode;
-        const runtimeRecommendation = {
+        runtimeRecommendation = {
           ...baseRuntimeRecommendation,
           phase: adaptivePlacementEnabled ? "adaptive-placement" : baseRuntimeRecommendation.phase,
           automaticPlacement: adaptivePlacementEnabled,
@@ -498,18 +502,6 @@ export function createHttpSseGatewayController({
           runtimeMode,
           runtimeRecommendation,
         });
-        if (placement.applied) {
-          observer.record("adaptive.placement.applied", {
-            method,
-            sessionId,
-            phase2RuntimeMode,
-            runtimeMode,
-            recommendedMode: runtimeRecommendation.recommendedMode,
-            driftFromPhase2Mode: placement.driftFromPhase2Mode,
-            source: placement.source,
-          });
-        }
-
         if (method !== "initialize" && !existingSessionRecord) {
           observer.record("request.rejected", {
             method,
@@ -539,6 +531,30 @@ export function createHttpSseGatewayController({
             statusCode: 410,
             message: "Reconnect grace period expired. Reinitialize the MCP session.",
           });
+        }
+
+        if (method === "initialize") {
+          if (placement.applied) {
+            observer.record("adaptive.placement.applied", {
+              method,
+              sessionId,
+              phase2RuntimeMode,
+              runtimeMode,
+              recommendedMode: runtimeRecommendation.recommendedMode,
+              driftFromPhase2Mode: placement.driftFromPhase2Mode,
+              source: placement.source,
+              runtimeModeSource: placement.runtimeModeSource,
+              clientId,
+            });
+          } else if (adaptivePlacementEnabled) {
+            observer.record("adaptive.placement.fallback", {
+              method,
+              sessionId,
+              clientId,
+              source: placement.source,
+              runtimeModeSource: placement.runtimeModeSource,
+            });
+          }
         }
 
         const route = await router.routeSession(sessionId, { runtimeMode });
@@ -607,6 +623,7 @@ export function createHttpSseGatewayController({
           });
         }
 
+        downstreamApplicationStarted = true;
         const envelope = await application.handleMessage(
           {
             jsonrpc: "2.0",
@@ -655,6 +672,19 @@ export function createHttpSseGatewayController({
           result,
         };
       } catch (error) {
+        const adaptivePlacementWasInvolved =
+          placement?.applied ||
+          existingSessionRecord?.metadata?.runtimeModeSource === "adaptive-classifier";
+        if (adaptivePlacementWasInvolved && downstreamApplicationStarted) {
+          observer.record("adaptive.placement.mismatch", {
+            method,
+            sessionId: sessionId ?? null,
+            runtimeMode: placement?.runtimeMode ?? existingSessionRecord?.metadata?.runtimeMode ?? null,
+            recommendedMode: runtimeRecommendation?.recommendedMode ?? null,
+            code: error?.code ?? "gateway-request-failed",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
         if (error?.code !== "session-not-found" && error?.code !== "reconnect-grace-expired") {
           observer.record("request.failed", {
             method,
@@ -744,7 +774,9 @@ function assertGatewayResult(envelope) {
   }
 
   if (envelope.error) {
-    throw new Error(envelope.error.message ?? "Gateway request failed");
+    const error = new Error(envelope.error.message ?? "Gateway request failed");
+    error.code = envelope.error.code;
+    throw error;
   }
 
   return envelope.result;

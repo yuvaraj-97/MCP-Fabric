@@ -1023,6 +1023,178 @@ test("gateway controller setAdaptivePlacementClientAllowlist updates allowlist",
   assert.equal(afterUpdate.runtimeRecommendation.adaptivePlacement.runtimeModeSource, "adaptive-classifier");
 });
 
+
+test("adaptive placement counters track stateless and sticky applied placements", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [
+      { serverInstanceId: "server-a", load: 0.1, healthy: true },
+      { serverInstanceId: "server-b", load: 0.2, healthy: true },
+    ],
+  });
+
+  const initialized1 = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-stateless",
+    params: {
+      clientId: "quality-test-1",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized1.runtimeMode, "stateless");
+
+  const initialized2 = await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-adaptive-sticky-quality",
+    params: {
+      clientId: "quality-test-2",
+    },
+  });
+
+  assert.equal(initialized2.runtimeMode, "sticky");
+  const summary1 = controller.describeObservability().summary;
+  assert.equal(summary1.totalAdaptivePlacementStateless, 1);
+  assert.equal(summary1.totalAdaptivePlacementSticky, 1);
+});
+
+test("adaptive placement fallback counter increments when canary-not-allowed", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: {
+      adaptivePlacementEnabled: true,
+      adaptivePlacementClientAllowlist: ["allowed-client"],
+    },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  await controller.handleGatewayMessage({
+    method: "initialize",
+    params: {
+      clientId: "not-allowed-client",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  const observability = controller.describeObservability();
+  assert.equal(observability.summary.totalAdaptivePlacementFallbacks, 1);
+  assert.ok(
+    observability.recentEvents.some(
+      (event) =>
+        event.eventType === "adaptive.placement.fallback" &&
+        event.runtimeModeSource === "canary-not-allowed",
+    ),
+  );
+});
+
+test("adaptive placement fallback counter increments when explicit override provided", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+  });
+
+  await controller.handleGatewayMessage({
+    method: "initialize",
+    sessionId: "session-explicit-override",
+    params: {
+      clientId: "explicit-override-test",
+      runtimeMode: "sticky",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  const observability = controller.describeObservability();
+  assert.equal(observability.summary.totalAdaptivePlacementFallbacks, 1);
+  assert.ok(
+    observability.recentEvents.some(
+      (event) =>
+        event.eventType === "adaptive.placement.fallback" &&
+        event.runtimeModeSource === "explicit",
+    ),
+  );
+});
+
+test("adaptive placement mismatch counter increments when adaptively placed application handling fails", async () => {
+  const controller = createHttpSseGatewayController({
+    operatorConfig: { adaptivePlacementEnabled: true },
+    serverInstances: [{ serverInstanceId: "server-a", load: 0.1, healthy: true }],
+    createApplication() {
+      const sessions = new Set();
+      return {
+        getSessionState(sessionId) {
+          return sessions.has(sessionId) ? { initialized: true } : undefined;
+        },
+        async handleMessage(message) {
+          if (message.method === "initialize") {
+            sessions.add(message.sessionId);
+            return {
+              jsonrpc: "2.0",
+              id: message.id,
+              result: { initialized: true },
+            };
+          }
+
+          return {
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              code: -32000,
+              message: "adaptive placement app failure",
+            },
+          };
+        },
+      };
+    },
+  });
+
+  const initialized = await controller.handleGatewayMessage({
+    method: "initialize",
+    params: {
+      clientId: "mismatch-test",
+      runtimeHints: {
+        replaySafe: true,
+        readOnly: true,
+        externalState: true,
+      },
+    },
+  });
+
+  assert.equal(initialized.runtimeMode, "stateless");
+
+  await assert.rejects(
+    () =>
+      controller.handleGatewayMessage({
+        method: "tools/call",
+        sessionId: initialized.sessionId,
+        params: { name: "stateful-tool" },
+      }),
+    /adaptive placement app failure/,
+  );
+
+  const observability = controller.describeObservability();
+  assert.equal(observability.summary.totalAdaptivePlacementMismatches, 1);
+  assert.ok(
+    observability.recentEvents.some(
+      (event) =>
+        event.eventType === "adaptive.placement.mismatch" &&
+        event.runtimeMode === "stateless" &&
+        event.code === -32000 &&
+        event.message === "adaptive placement app failure",
+    ),
+  );
+});
+
 function createEventCollector() {
   return {
     chunks: [],
