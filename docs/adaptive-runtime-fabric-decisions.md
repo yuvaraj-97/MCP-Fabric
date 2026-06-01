@@ -85,6 +85,12 @@ immediately.
    stored mode, and only new sessions without an explicit mode may use the
    classifier recommendation as the routing mode.
 
+   Local Phase 3 evidence is tracked in
+   [`phase-3-local-evidence.md`](./phase-3-local-evidence.md). Local filesystem,
+   git, memory, and shared-Redis proofs are complete for the implemented
+   `stateless` and `sticky` modes; external canary telemetry remains required
+   before widening rollout or making production claims.
+
    Phase 4 remains deferred until production-like telemetry validates adaptive
    placement quality across real workloads.
 

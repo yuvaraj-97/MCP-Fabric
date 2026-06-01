@@ -193,7 +193,9 @@ Lead: Codex, with Claude and Antigravity review.
 Status: started as a guarded Phase 3 tracer bullet. Adaptive placement is
 implemented behind a default-off operator gate, with canary allowlists,
 runtime-mode-source metadata, quality counters, validation, and rollback
-guidance. It is not a general production default.
+guidance. The local evidence ledger is
+[`phase-3-local-evidence.md`](./phase-3-local-evidence.md). It is not a general
+production default.
 
 Required gates:
 
