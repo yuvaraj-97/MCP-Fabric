@@ -198,7 +198,8 @@ guidance. It is not a general production default.
 Required gates:
 
 - measured recommendation quality before widening rollout;
-- documented mode recovery matrix;
+- documented mode recovery matrix
+  ([`mode-recovery-matrix.md`](./mode-recovery-matrix.md));
 - operator flag for adaptive placement;
 - rollback path;
 - observability showing why placement happened;

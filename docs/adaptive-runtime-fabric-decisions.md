@@ -136,7 +136,8 @@ immediately.
     - Redis outage behavior;
     - bounded memory under churn;
     - structured observability for placement decisions;
-    - documented recovery behavior per mode;
+    - documented recovery behavior per mode, maintained in
+      [`mode-recovery-matrix.md`](./mode-recovery-matrix.md);
     - canary and rollback guidance.
 
 ## Consequences
