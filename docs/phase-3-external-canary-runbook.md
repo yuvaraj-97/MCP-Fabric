@@ -60,6 +60,27 @@ phase-3-external-canary-report.md
 If the fleet has multiple gateway processes, prefix each snapshot with the
 gateway ID, for example `gateway-a-baseline-observability.json`.
 
+The evidence helper can capture `/observability` and `/sessions` snapshots and
+write the report template:
+
+```sh
+MCP_PHASE3_CANARY_PHASE=baseline \
+MCP_PHASE3_CANARY_GATEWAYS=gateway-a=http://127.0.0.1:4400,gateway-b=http://127.0.0.1:4401 \
+MCP_PHASE3_CANARY_ENVIRONMENT=staging \
+MCP_PHASE3_CANARY_TRAFFIC_WINDOW="2026-06-01T10:00Z/2026-06-01T10:15Z" \
+MCP_PHASE3_CANARY_WORKLOADS=filesystem,git,memory \
+MCP_PHASE3_CANARY_CLIENT_ALLOWLIST=canary-client-1,canary-client-2 \
+npm run validate:adaptive-placement:external-canary:evidence
+```
+
+Use `MCP_PHASE3_CANARY_PHASE=canary` during the adaptive window and
+`MCP_PHASE3_CANARY_PHASE=rollback` after rollback. Set
+`MCP_PHASE3_CANARY_CLIENT_ALLOWLIST` to the same client IDs configured in
+`MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST`; this lets the helper flag
+captured adaptive sessions outside the canary scope. Override the output root
+with `MCP_PHASE3_CANARY_OUTPUT_DIR`; it defaults to
+`validation-artifacts/phase-3-external-canary`.
+
 ## Step 1: Baseline
 
 Run with adaptive placement disabled:
