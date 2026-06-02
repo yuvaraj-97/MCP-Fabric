@@ -4,6 +4,7 @@ const report = await collectExternalCanaryEvidence({
   phase: process.env.MCP_PHASE3_CANARY_PHASE,
   gateways: process.env.MCP_PHASE3_CANARY_GATEWAYS,
   outputDir: process.env.MCP_PHASE3_CANARY_OUTPUT_DIR,
+  runId: process.env.MCP_PHASE3_CANARY_RUN_ID,
   environment: process.env.MCP_PHASE3_CANARY_ENVIRONMENT ?? "unspecified",
   trafficWindow: process.env.MCP_PHASE3_CANARY_TRAFFIC_WINDOW ?? "unspecified",
   workloads: parseList(process.env.MCP_PHASE3_CANARY_WORKLOADS),
