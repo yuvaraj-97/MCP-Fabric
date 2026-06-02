@@ -10,6 +10,7 @@ export async function collectExternalCanaryEvidence({
   phase,
   gateways,
   outputDir = DEFAULT_OUTPUT_DIR,
+  runId,
   environment = "unspecified",
   trafficWindow = "unspecified",
   workloads = [],
@@ -23,8 +24,8 @@ export async function collectExternalCanaryEvidence({
   const normalizedPhase = normalizePhase(phase);
   const gatewaySpecs = normalizeGatewaySpecs(gateways);
   const capturedAt = now();
-  const runId = formatRunId(capturedAt);
-  const resolvedOutputDir = resolve(outputDir, runId);
+  const normalizedRunId = normalizeRunId(runId ?? formatRunId(capturedAt));
+  const resolvedOutputDir = resolve(outputDir, normalizedRunId);
   const normalizedCanaryClientAllowlist = normalizeStringList(canaryClientAllowlist);
   const downstreamErrorEvidence = loadDownstreamErrorEvidence(downstreamErrors, normalizedPhase);
   const normalizedBaselineDownstreamErrorRate = normalizeOptionalNumber(
@@ -55,7 +56,7 @@ export async function collectExternalCanaryEvidence({
   }
 
   const report = {
-    runId,
+    runId: normalizedRunId,
     phase: normalizedPhase,
     environment,
     trafficWindow,
@@ -511,4 +512,12 @@ function trimSlash(value) {
 
 function formatRunId(date) {
   return date.toISOString().replaceAll(":", "").replaceAll(".", "-");
+}
+
+function normalizeRunId(value) {
+  const runId = assertNonEmptyString(value, "runId");
+  if (!/^[a-zA-Z0-9._-]+$/.test(runId)) {
+    throw new TypeError("runId may contain only letters, numbers, dots, underscores, and hyphens");
+  }
+  return runId;
 }

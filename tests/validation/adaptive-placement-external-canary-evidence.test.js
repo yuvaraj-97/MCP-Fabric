@@ -10,6 +10,9 @@ import {
   collectExternalCanaryEvidence,
   parseGatewaySpecs,
 } from "../../validation/adaptive-placement/external-canary-evidence.js";
+import {
+  verifyExternalCanaryEvidence,
+} from "../../validation/adaptive-placement/verify-external-canary-evidence.js";
 
 test("parseGatewaySpecs supports explicit IDs and generated IDs", () => {
   assert.deepEqual(parseGatewaySpecs("gw-a=http://127.0.0.1:3000, http://127.0.0.1:3001"), [
@@ -95,6 +98,7 @@ test("external canary evidence captures gateway snapshots and writes report arti
       phase: "canary",
       gateways: [{ gatewayId: "gw-a", baseUrl: `http://127.0.0.1:${port}` }],
       outputDir,
+      runId: "shared-canary-run",
       environment: "test",
       trafficWindow: "unit-test",
       workloads: ["filesystem", "git", "memory"],
@@ -108,7 +112,9 @@ test("external canary evidence captures gateway snapshots and writes report arti
     assert.equal(report.gateways[0].assessment.status, "pass");
     assert.equal(report.gateways[0].observability.summary.totalAdaptivePlacements, 1);
 
-    const artifactDir = join(outputDir, "2026-06-01T000000-000Z");
+    assert.equal(report.runId, "shared-canary-run");
+
+    const artifactDir = join(outputDir, "shared-canary-run");
     const reportMarkdown = readFileSync(
       join(artifactDir, "phase-3-external-canary-report.md"),
       "utf8",
@@ -132,6 +138,75 @@ test("external canary evidence captures gateway snapshots and writes report arti
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("verifyExternalCanaryEvidence requires all phase artifacts and machine checks", () => {
+  const evidenceDir = mkdtempSync(join(tmpdir(), "phase-3-canary-complete-evidence-"));
+  const gatewayId = "gw-a";
+
+  for (const phase of ["baseline", "canary", "rollback"]) {
+    writeFileSync(
+      join(evidenceDir, `${phase}-evidence-summary.json`),
+      `${JSON.stringify({
+        phase,
+        summary: { overallStatus: "pass", reasons: [] },
+        gateways: [{ gatewayId }],
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    writeFileSync(join(evidenceDir, `${gatewayId}-${phase}-observability.json`), "{}\n", "utf8");
+    writeFileSync(join(evidenceDir, `${gatewayId}-${phase}-sessions.json`), "{}\n", "utf8");
+  }
+
+  writeFileSync(join(evidenceDir, `${gatewayId}-baseline-errors.json`), "{}\n", "utf8");
+  writeFileSync(join(evidenceDir, `${gatewayId}-canary-errors.json`), "{}\n", "utf8");
+  writeFileSync(
+    join(evidenceDir, "phase-3-external-canary-report.md"),
+    [
+      "# Phase 3 External Canary Report",
+      "",
+      "Machine checks: PASS",
+      "Result: MANUAL_DECISION_REQUIRED",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const report = verifyExternalCanaryEvidence({ evidenceDir });
+
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.gatewayIds, [gatewayId]);
+});
+
+test("verifyExternalCanaryEvidence fails closed for missing approval and artifacts", () => {
+  const evidenceDir = mkdtempSync(join(tmpdir(), "phase-3-canary-incomplete-evidence-"));
+  writeFileSync(
+    join(evidenceDir, "baseline-evidence-summary.json"),
+    `${JSON.stringify({
+      phase: "baseline",
+      summary: { overallStatus: "review_required", reasons: ["missing downstream errors"] },
+      gateways: [{ gatewayId: "gw-a" }],
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  writeFileSync(
+    join(evidenceDir, "phase-3-external-canary-report.md"),
+    "Result: MANUAL_DECISION_REQUIRED\nOperator approval:\nReviewer approval:\n",
+    "utf8",
+  );
+
+  const report = verifyExternalCanaryEvidence({
+    evidenceDir,
+    gatewayIds: ["gw-a"],
+    requireManualApproval: true,
+  });
+
+  assert.equal(report.ok, false);
+  assert.match(report.reasons.join("\n"), /missing canary-evidence-summary\.json/);
+  assert.match(report.reasons.join("\n"), /machine checks are review_required/);
+  assert.match(report.reasons.join("\n"), /missing gw-a-baseline-errors\.json/);
+  assert.match(report.reasons.join("\n"), /final Result: PASS/);
+  assert.match(report.reasons.join("\n"), /operator approval/);
 });
 
 test("buildReportMarkdown marks failed machine checks as review required", () => {

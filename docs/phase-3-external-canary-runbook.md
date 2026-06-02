@@ -65,6 +65,7 @@ write the report template:
 
 ```sh
 MCP_PHASE3_CANARY_PHASE=baseline \
+MCP_PHASE3_CANARY_RUN_ID=20260601-staging-canary-a \
 MCP_PHASE3_CANARY_GATEWAYS=gateway-a=http://127.0.0.1:4400,gateway-b=http://127.0.0.1:4401 \
 MCP_PHASE3_CANARY_ENVIRONMENT=staging \
 MCP_PHASE3_CANARY_TRAFFIC_WINDOW="2026-06-01T10:00Z/2026-06-01T10:15Z" \
@@ -77,8 +78,10 @@ npm run validate:adaptive-placement:external-canary:evidence
 ```
 
 Use `MCP_PHASE3_CANARY_PHASE=canary` during the adaptive window and
-`MCP_PHASE3_CANARY_PHASE=rollback` after rollback. Set
-`MCP_PHASE3_CANARY_CLIENT_ALLOWLIST` to the same client IDs configured in
+`MCP_PHASE3_CANARY_PHASE=rollback` after rollback. Use the same
+`MCP_PHASE3_CANARY_RUN_ID` for baseline, canary, and rollback captures so the
+evidence lands in one run directory. Set `MCP_PHASE3_CANARY_CLIENT_ALLOWLIST` to
+the same client IDs configured in
 `MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST`; this lets the helper flag
 captured adaptive sessions outside the canary scope. Override the output root
 with `MCP_PHASE3_CANARY_OUTPUT_DIR`; it defaults to
@@ -91,6 +94,25 @@ During the canary phase, set
 `MCP_PHASE3_CANARY_BASELINE_DOWNSTREAM_ERROR_RATE` to the accepted Phase 2
 baseline and keep `MCP_PHASE3_CANARY_MAX_DOWNSTREAM_ERROR_RATE_DELTA=0` unless
 the environment has an explicitly approved tolerance.
+
+After baseline, canary, and rollback captures are complete, verify the evidence
+directory:
+
+```sh
+MCP_PHASE3_CANARY_EVIDENCE_DIR=validation-artifacts/phase-3-external-canary/20260601-staging-canary-a \
+MCP_PHASE3_CANARY_VERIFY_GATEWAYS=gateway-a,gateway-b \
+npm run validate:adaptive-placement:external-canary:verify
+```
+
+After the operator and reviewer have filled in the final report approval fields
+and set `Result: PASS`, run the verifier with manual approval required:
+
+```sh
+MCP_PHASE3_CANARY_EVIDENCE_DIR=validation-artifacts/phase-3-external-canary/20260601-staging-canary-a \
+MCP_PHASE3_CANARY_VERIFY_GATEWAYS=gateway-a,gateway-b \
+MCP_PHASE3_CANARY_REQUIRE_MANUAL_APPROVAL=true \
+npm run validate:adaptive-placement:external-canary:verify
+```
 
 ## Step 1: Baseline
 
