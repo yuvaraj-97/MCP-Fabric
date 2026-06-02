@@ -70,6 +70,9 @@ MCP_PHASE3_CANARY_ENVIRONMENT=staging \
 MCP_PHASE3_CANARY_TRAFFIC_WINDOW="2026-06-01T10:00Z/2026-06-01T10:15Z" \
 MCP_PHASE3_CANARY_WORKLOADS=filesystem,git,memory \
 MCP_PHASE3_CANARY_CLIENT_ALLOWLIST=canary-client-1,canary-client-2 \
+MCP_PHASE3_CANARY_DOWNSTREAM_ERRORS=gateway-a=./gateway-a-baseline-errors.json,gateway-b=./gateway-b-baseline-errors.json \
+MCP_PHASE3_CANARY_BASELINE_DOWNSTREAM_ERROR_RATE=0.001 \
+MCP_PHASE3_CANARY_MAX_DOWNSTREAM_ERROR_RATE_DELTA=0 \
 npm run validate:adaptive-placement:external-canary:evidence
 ```
 
@@ -80,6 +83,14 @@ Use `MCP_PHASE3_CANARY_PHASE=canary` during the adaptive window and
 captured adaptive sessions outside the canary scope. Override the output root
 with `MCP_PHASE3_CANARY_OUTPUT_DIR`; it defaults to
 `validation-artifacts/phase-3-external-canary`.
+
+Set `MCP_PHASE3_CANARY_DOWNSTREAM_ERRORS` to comma-separated JSON evidence
+files using `gateway-id=path` entries. Each JSON file should include either
+`errorRate` or request/error counts such as `totalRequests` and `totalErrors`.
+During the canary phase, set
+`MCP_PHASE3_CANARY_BASELINE_DOWNSTREAM_ERROR_RATE` to the accepted Phase 2
+baseline and keep `MCP_PHASE3_CANARY_MAX_DOWNSTREAM_ERROR_RATE_DELTA=0` unless
+the environment has an explicitly approved tolerance.
 
 ## Step 1: Baseline
 
@@ -183,6 +194,8 @@ Gateway count:
 Canary client allowlist:
 Traffic window:
 Workloads covered:
+Baseline downstream error rate:
+Allowed downstream error-rate delta:
 
 ## Baseline
 
@@ -220,6 +233,13 @@ Unexpected fallback sources observed:
 - invalid-classifier-recommendation:
 - other:
 
+Downstream error evidence:
+- Gateway:
+- Requests:
+- Errors:
+- Error rate:
+- Threshold comparison:
+
 Evidence files:
 - canary-observability.json
 - canary-sessions.json
@@ -227,7 +247,8 @@ Evidence files:
 
 ## Decision
 
-Result: PASS | FAIL | ROLLED BACK
+Machine checks: PASS | REVIEW_REQUIRED
+Result: MANUAL_DECISION_REQUIRED | PASS | FAIL | ROLLED BACK
 
 Reason:
 
