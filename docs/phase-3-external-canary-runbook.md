@@ -63,6 +63,25 @@ gateway ID, for example `gateway-a-baseline-observability.json`.
 The evidence helper can capture `/observability` and `/sessions` snapshots and
 write the report template:
 
+Before the canary window, generate a run plan with a stable run ID and
+copy-pasteable phase commands:
+
+```sh
+MCP_PHASE3_CANARY_RUN_ID=20260601-staging-canary-a \
+MCP_PHASE3_CANARY_GATEWAYS=gateway-a=http://127.0.0.1:4400,gateway-b=http://127.0.0.1:4401 \
+MCP_PHASE3_CANARY_ENVIRONMENT=staging \
+MCP_PHASE3_CANARY_TRAFFIC_WINDOW="2026-06-01T10:00Z/2026-06-01T10:15Z" \
+MCP_PHASE3_CANARY_WORKLOADS=filesystem,git,memory \
+MCP_PHASE3_CANARY_CLIENT_ALLOWLIST=canary-client-1,canary-client-2 \
+MCP_PHASE3_CANARY_BASELINE_DOWNSTREAM_ERROR_RATE=0.001 \
+MCP_PHASE3_CANARY_MAX_DOWNSTREAM_ERROR_RATE_DELTA=0 \
+npm run validate:adaptive-placement:external-canary:plan
+```
+
+The planner writes `phase-3-external-canary-plan.json` and
+`phase-3-external-canary-plan.md` into the run evidence directory. It does not
+contact gateways or run traffic; it only prepares the operator command sequence.
+
 ```sh
 MCP_PHASE3_CANARY_PHASE=baseline \
 MCP_PHASE3_CANARY_RUN_ID=20260601-staging-canary-a \
