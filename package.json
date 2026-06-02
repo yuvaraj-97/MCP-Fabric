@@ -28,6 +28,7 @@
     "validate:adaptive-placement:load": "node --expose-gc validation/adaptive-placement/run-load-validation.js",
     "validate:adaptive-placement:real-workloads": "node validation/adaptive-placement/run-real-workload-validation.js",
     "validate:adaptive-placement:sustained": "node validation/adaptive-placement/run-sustained-validation.js",
+    "validate:adaptive-placement:external-canary:plan": "node validation/adaptive-placement/run-plan-external-canary.js",
     "validate:adaptive-placement:external-canary:evidence": "node validation/adaptive-placement/run-external-canary-evidence.js",
     "validate:adaptive-placement:external-canary:verify": "node validation/adaptive-placement/run-verify-external-canary-evidence.js",
     "validate:shared-redis": "node validation/shared-redis/run-proof.js",

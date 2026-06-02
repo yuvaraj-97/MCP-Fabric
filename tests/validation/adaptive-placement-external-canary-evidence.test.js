@@ -11,6 +11,9 @@ import {
   parseGatewaySpecs,
 } from "../../validation/adaptive-placement/external-canary-evidence.js";
 import {
+  createExternalCanaryPlan,
+} from "../../validation/adaptive-placement/plan-external-canary.js";
+import {
   verifyExternalCanaryEvidence,
 } from "../../validation/adaptive-placement/verify-external-canary-evidence.js";
 
@@ -19,6 +22,37 @@ test("parseGatewaySpecs supports explicit IDs and generated IDs", () => {
     { gatewayId: "gw-a", baseUrl: "http://127.0.0.1:3000" },
     { gatewayId: "gateway-2", baseUrl: "http://127.0.0.1:3001" },
   ]);
+});
+
+test("createExternalCanaryPlan writes stable phase commands without running gateways", () => {
+  const outputDir = mkdtempSync(join(tmpdir(), "phase-3-canary-plan-test-"));
+  const plan = createExternalCanaryPlan({
+    gateways: "gw-a=http://127.0.0.1:4400,gw-b=http://127.0.0.1:4401",
+    runId: "plan-run-a",
+    outputDir,
+    environment: "staging",
+    trafficWindow: "2026-06-01T10:00Z/2026-06-01T10:15Z",
+    workloads: ["filesystem", "git", "memory"],
+    canaryClientAllowlist: ["canary-client-1", "canary-client-2"],
+    baselineDownstreamErrorRate: 0.001,
+  });
+
+  assert.equal(plan.runId, "plan-run-a");
+  assert.deepEqual(plan.gatewayIds, ["gw-a", "gw-b"]);
+  assert.equal(plan.phases.length, 3);
+  assert.match(plan.phases[0].command, /MCP_PHASE3_CANARY_PHASE='baseline'/);
+  assert.match(plan.phases[1].command, /gw-a=\.\/gw-a-canary-source-errors\.json/);
+  assert.match(plan.verifyCommand, /validate:adaptive-placement:external-canary:verify/);
+  assert.match(plan.finalApprovalVerifyCommand, /MCP_PHASE3_CANARY_REQUIRE_MANUAL_APPROVAL=true/);
+
+  const planJson = JSON.parse(
+    readFileSync(join(outputDir, "plan-run-a", "phase-3-external-canary-plan.json"), "utf8"),
+  );
+  assert.equal(planJson.environment, "staging");
+  assert.match(
+    readFileSync(join(outputDir, "plan-run-a", "phase-3-external-canary-plan.md"), "utf8"),
+    /Phase 3 External Canary Plan/,
+  );
 });
 
 test("external canary evidence captures gateway snapshots and writes report artifacts", async (t) => {
