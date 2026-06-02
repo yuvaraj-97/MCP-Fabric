@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { fetchJson } from "../multicontainer/http-utils.js";
@@ -14,6 +14,9 @@ export async function collectExternalCanaryEvidence({
   trafficWindow = "unspecified",
   workloads = [],
   canaryClientAllowlist = [],
+  downstreamErrors = [],
+  baselineDownstreamErrorRate,
+  maxDownstreamErrorRateDelta = 0,
   writeArtifacts = true,
   now = () => new Date(),
 } = {}) {
@@ -23,6 +26,15 @@ export async function collectExternalCanaryEvidence({
   const runId = formatRunId(capturedAt);
   const resolvedOutputDir = resolve(outputDir, runId);
   const normalizedCanaryClientAllowlist = normalizeStringList(canaryClientAllowlist);
+  const downstreamErrorEvidence = loadDownstreamErrorEvidence(downstreamErrors, normalizedPhase);
+  const normalizedBaselineDownstreamErrorRate = normalizeOptionalNumber(
+    baselineDownstreamErrorRate,
+    "baselineDownstreamErrorRate",
+  );
+  const normalizedMaxDownstreamErrorRateDelta = normalizeOptionalNumber(
+    maxDownstreamErrorRateDelta,
+    "maxDownstreamErrorRateDelta",
+  ) ?? 0;
 
   const gatewayReports = [];
   for (const gateway of gatewaySpecs) {
@@ -49,10 +61,21 @@ export async function collectExternalCanaryEvidence({
     trafficWindow,
     workloads,
     canaryClientAllowlist: normalizedCanaryClientAllowlist,
+    baselineDownstreamErrorRate: normalizedBaselineDownstreamErrorRate,
+    maxDownstreamErrorRateDelta: normalizedMaxDownstreamErrorRateDelta,
     generatedAt: capturedAt.toISOString(),
     outputDir: resolvedOutputDir,
     gateways: gatewayReports,
-    summary: summarizeAssessments(gatewayReports),
+    downstreamErrors: downstreamErrorEvidence,
+    summary: summarizeAssessments(
+      gatewayReports,
+      assessDownstreamErrors({
+        phase: normalizedPhase,
+        downstreamErrors: downstreamErrorEvidence,
+        baselineDownstreamErrorRate: normalizedBaselineDownstreamErrorRate,
+        maxDownstreamErrorRateDelta: normalizedMaxDownstreamErrorRateDelta,
+      }),
+    ),
   };
 
   if (writeArtifacts) {
@@ -96,6 +119,8 @@ export function buildReportMarkdown(report) {
     `Traffic window: ${report.trafficWindow}`,
     `Workloads covered: ${report.workloads.length > 0 ? report.workloads.join(", ") : "unspecified"}`,
     `Phase captured: ${report.phase}`,
+    `Baseline downstream error rate: ${formatRate(report.baselineDownstreamErrorRate)}`,
+    `Allowed downstream error-rate delta: ${formatRate(report.maxDownstreamErrorRateDelta)}`,
     "",
     "## Gateway Evidence",
     "",
@@ -109,6 +134,26 @@ export function buildReportMarkdown(report) {
     lines.push(
       `| ${gateway.gatewayId} | ${String(operatorConfig.adaptivePlacementEnabled ?? "unknown")} | ${summary.totalRequests ?? "n/a"} | ${summary.totalAdaptivePlacements ?? "n/a"} | ${summary.totalAdaptivePlacementStateless ?? "n/a"} | ${summary.totalAdaptivePlacementSticky ?? "n/a"} | ${summary.totalAdaptivePlacementFallbacks ?? "n/a"} | ${summary.totalAdaptivePlacementMismatches ?? "n/a"} | ${summary.totalErrors ?? "n/a"} | ${gateway.assessment.status} |`,
     );
+  }
+
+  lines.push(
+    "",
+    "## Downstream Error Evidence",
+    "",
+  );
+
+  if (report.downstreamErrors?.length > 0) {
+    lines.push(
+      "| Source | Requests | Errors | Error rate | Evidence file |",
+      "| --- | ---: | ---: | ---: | --- |",
+    );
+    for (const evidence of report.downstreamErrors) {
+      lines.push(
+        `| ${evidence.gatewayId} | ${evidence.totalRequests ?? "n/a"} | ${evidence.totalErrors ?? "n/a"} | ${formatRate(evidence.errorRate)} | ${evidence.artifactName} |`,
+      );
+    }
+  } else {
+    lines.push("- Not captured for this phase.");
   }
 
   lines.push(
@@ -219,10 +264,45 @@ function hasNonAllowlistedAdaptiveClassifier(sessions, canaryClientAllowlist) {
   });
 }
 
-function summarizeAssessments(gatewayReports) {
+function assessDownstreamErrors({
+  phase,
+  downstreamErrors,
+  baselineDownstreamErrorRate,
+  maxDownstreamErrorRateDelta,
+}) {
+  const reasons = [];
+
+  if ((phase === "baseline" || phase === "canary") && downstreamErrors.length === 0) {
+    reasons.push(`${phase} requires downstream error evidence`);
+  }
+
+  for (const evidence of downstreamErrors) {
+    if (evidence.errorRate === undefined) {
+      reasons.push(`${evidence.gatewayId}: downstream error evidence requires errorRate or request/error counts`);
+      continue;
+    }
+    if (
+      phase === "canary" &&
+      baselineDownstreamErrorRate !== undefined &&
+      evidence.errorRate > baselineDownstreamErrorRate + maxDownstreamErrorRateDelta
+    ) {
+      reasons.push(
+        `${evidence.gatewayId}: downstream error rate ${formatRate(evidence.errorRate)} exceeds baseline ${formatRate(baselineDownstreamErrorRate)} plus delta ${formatRate(maxDownstreamErrorRateDelta)}`,
+      );
+    }
+  }
+
+  return {
+    status: reasons.length === 0 ? "pass" : "review_required",
+    reasons,
+  };
+}
+
+function summarizeAssessments(gatewayReports, downstreamAssessment) {
   const reasons = gatewayReports.flatMap((gateway) =>
     gateway.assessment.reasons.map((reason) => `${gateway.gatewayId}: ${reason}`),
   );
+  reasons.push(...downstreamAssessment.reasons.map((reason) => `downstream: ${reason}`));
   return {
     overallStatus: reasons.length === 0 ? "pass" : "review_required",
     reasons,
@@ -257,6 +337,10 @@ function writeEvidenceArtifacts(report) {
     );
   }
 
+  for (const evidence of report.downstreamErrors) {
+    writeJson(resolve(report.outputDir, evidence.artifactName), evidence.payload);
+  }
+
   writeJson(resolve(report.outputDir, `${report.phase}-evidence-summary.json`), report);
   writeFileSync(
     resolve(report.outputDir, "phase-3-external-canary-report.md"),
@@ -288,6 +372,114 @@ function normalizeStringList(value) {
     return value.split(",").map((entry) => entry.trim()).filter(Boolean);
   }
   return [];
+}
+
+function loadDownstreamErrorEvidence(raw, phase) {
+  if (raw === undefined || raw === null || raw === "") {
+    return [];
+  }
+
+  if (typeof raw === "string") {
+    return parseDownstreamErrorSpecs(raw).map((spec, index) =>
+      normalizeDownstreamErrorEvidence(
+        {
+          gatewayId: spec.gatewayId,
+          sourcePath: spec.filePath,
+          payload: JSON.parse(readFileSync(spec.filePath, "utf8")),
+        },
+        phase,
+        index,
+      ),
+    );
+  }
+
+  if (!Array.isArray(raw)) {
+    throw new TypeError("downstreamErrors must be a comma-separated file list or an array");
+  }
+
+  return raw.map((entry, index) => normalizeDownstreamErrorEvidence(entry, phase, index));
+}
+
+function parseDownstreamErrorSpecs(raw) {
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry, index) => {
+      const separatorIndex = entry.indexOf("=");
+      if (separatorIndex >= 0) {
+        return {
+          gatewayId: assertIdentifier(entry.slice(0, separatorIndex).trim()),
+          filePath: assertNonEmptyString(entry.slice(separatorIndex + 1).trim(), "downstream error file path"),
+        };
+      }
+      return {
+        gatewayId: `errors-${index + 1}`,
+        filePath: assertNonEmptyString(entry, "downstream error file path"),
+      };
+    });
+}
+
+function normalizeDownstreamErrorEvidence(entry, phase, index) {
+  const payload = entry.payload ?? entry;
+  const gatewayId = assertIdentifier(entry.gatewayId || payload.gatewayId || `errors-${index + 1}`);
+  const totalRequests = firstNumber(payload, [
+    "totalRequests",
+    "requests",
+    "requestCount",
+    "downstreamRequests",
+  ]);
+  const totalErrors = firstNumber(payload, [
+    "totalErrors",
+    "errors",
+    "errorCount",
+    "downstreamErrors",
+  ]);
+  const explicitErrorRate = firstNumber(payload, [
+    "errorRate",
+    "downstreamErrorRate",
+    "applicationErrorRate",
+  ]);
+  const computedErrorRate =
+    explicitErrorRate ?? (totalRequests > 0 && totalErrors !== undefined ? totalErrors / totalRequests : undefined);
+
+  return {
+    gatewayId,
+    sourcePath: entry.sourcePath,
+    artifactName: `${gatewayId}-${phase}-errors.json`,
+    totalRequests,
+    totalErrors,
+    errorRate: computedErrorRate,
+    payload,
+  };
+}
+
+function firstNumber(payload, keys) {
+  for (const key of keys) {
+    const value = normalizeOptionalNumber(payload?.[key], key);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeOptionalNumber(value, name) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const numberValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < 0) {
+    throw new TypeError(`${name} must be a non-negative number`);
+  }
+  return numberValue;
+}
+
+function formatRate(value) {
+  if (value === undefined || value === null) {
+    return "not captured";
+  }
+  return Number(value).toFixed(6);
 }
 
 function normalizePhase(phase) {
