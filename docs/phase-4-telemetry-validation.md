@@ -130,6 +130,40 @@ To require a minimum high-confidence recommendation ratio, set:
 MCP_PHASE4_TELEMETRY_MIN_HIGH_CONFIDENCE_RATIO=1
 ```
 
+### Durable evidence capture
+
+The telemetry summary is captured durably in addition to being printed. Each
+run writes a self-describing record to
+`validation-artifacts/phase-4-telemetry/<run-id>/telemetry-summary.json`
+(`schemaVersion`, `runId`, `capturedAt`, and the full `summary`). Standard
+output stays pure summary JSON for downstream parsers; the written path is
+reported on standard error. Because `validation-artifacts/` is git-ignored,
+captured runs never pollute the tracked worktree, and CI must publish the run
+directory as a build artifact when evidence needs to leave the machine.
+
+| Variable | Effect | Default |
+| --- | --- | --- |
+| `MCP_PHASE4_TELEMETRY_RUN_ID` | Names the run directory | generated `YYYYMMDD-HHMMSS` (UTC) |
+| `MCP_PHASE4_TELEMETRY_OUTPUT_DIR` | Base directory for captured runs | `validation-artifacts/phase-4-telemetry` |
+| `MCP_PHASE4_TELEMETRY_PERSIST` | Set to `0`/`false`/`no`/`off` to skip capture | capture enabled |
+
+```sh
+MCP_PHASE4_TELEMETRY_EVIDENCE_DIR=validation-artifacts/phase-3-external-canary/20260610-150232-staging \
+MCP_PHASE4_TELEMETRY_RUN_ID=20260610-150232-staging \
+npm run validate:adaptive-placement:telemetry-summary
+```
+
+### Compose host ports
+
+The Phase 4 telemetry workflow consumes captured JSON evidence; it does not
+drive the adaptive-placement Docker topology directly. In
+`validation/adaptive-placement/compose.yaml`, only the gateways publish host
+ports (4400/4401). The internal `mcp-server-a`/`mcp-server-b` MCP servers are
+reached over the Docker network by service name (`http://mcp-server-a:4101`),
+matching the `validation/shared-redis` and `validation/multicontainer` compose
+files, so they intentionally do **not** publish host ports 4101/4102. Do not
+re-add those mappings without a documented host-side consumer.
+
 In Docker-capable environments, run the shared-Redis Docker topology before
 making horizontal gateway claims:
 
@@ -173,7 +207,9 @@ Phase 4 self-optimization can be planned only after:
 3. The validation summary records zero mismatches, zero invalid-classifier
    fallbacks, and no downstream error regression.
 4. The proposed self-optimization behavior has a separate design review that
-   explains its rollback path and how explicit overrides continue to win.
+   explains its rollback path and how explicit overrides continue to win. That
+   design review is maintained in
+   [`phase-4-self-optimization-rfc.md`](./phase-4-self-optimization-rfc.md).
 
 Until those criteria are met, adaptive placement remains a guarded Phase 3
 capability and Phase 4 work remains telemetry-only.

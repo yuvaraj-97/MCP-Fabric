@@ -94,7 +94,9 @@ immediately.
    Phase 4 self-optimization remains deferred until production-like telemetry
    validates adaptive placement quality across real workloads. The active
    preparation work is documented in
-   [`phase-4-telemetry-validation.md`](./phase-4-telemetry-validation.md).
+   [`phase-4-telemetry-validation.md`](./phase-4-telemetry-validation.md), and
+   the (planning-only) self-optimization design is in
+   [`phase-4-self-optimization-rfc.md`](./phase-4-self-optimization-rfc.md).
 
 9. **Classifier signal sources**
 
