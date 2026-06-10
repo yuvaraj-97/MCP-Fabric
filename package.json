@@ -8,6 +8,7 @@
     "test": "node --expose-gc tests/run-tests.js",
     "test:unit": "node --expose-gc tests/run-tests.js",
     "test:integration": "node --test tests/transport-agnostic/stdio-http-parity.test.js tests/failover/http-sse-gateway.test.js",
+    "start:gateway": "node packages/gateway/bin/standalone-gateway.js",
     "demo": "node apps/local-dashboard/server.js",
     "demo:stdio": "node examples/stdio-server/server.js",
     "demo:http": "node examples/http-sse-server/server.js",

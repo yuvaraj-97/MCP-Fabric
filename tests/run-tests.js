@@ -1,6 +1,7 @@
 import "./gateway/operator-config.test.js";
 import "./gateway/create-session-registry.test.js";
 import "./gateway/ioredis-client.test.js";
+import "./gateway/standalone-gateway.test.js";
 import "./session-routing/memory-session-registry.test.js";
 import "./session-routing/file-session-registry.test.js";
 import "./session-routing/redis-session-registry.test.js";
@@ -23,6 +24,7 @@ import "./validation/adaptive-placement-real-workload.test.js";
 import "./validation/adaptive-placement-sustained.test.js";
 import "./validation/adaptive-placement-external-canary-evidence.test.js";
 import "./validation/adaptive-placement-telemetry-summary.test.js";
+import "./validation/adaptive-placement-telemetry-evidence.test.js";
 import "./transport-agnostic/mcp-application-server.test.js";
 import "./transport-agnostic/mcp-custom-methods.test.js";
 import "./transport-agnostic/stdio-transport.test.js";

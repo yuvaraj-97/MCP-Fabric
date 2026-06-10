@@ -63,6 +63,10 @@ docs/
   prototype-roadmap.md
   public-proposal.md
   test-strategy.md
+  standalone-gateway.md
+  deployment-guide.md
+  mode-recovery-matrix.md
+  runtime-fabric-roadmap.md
 
 apps/
   local-dashboard/
@@ -125,8 +129,28 @@ The implemented slices today are:
   visibility, durable restart/reconnect behavior, failover, and dashboard
   startup
 
-External production-grade state backends, operator-friendly policy controls, and
-fuller gateway packaging are still the next recommended build steps.
+### Production readiness
+
+**Recommended classification: production-candidate.**
+
+The gateway can be packaged and run as an independent process
+([docs/standalone-gateway.md](./docs/standalone-gateway.md)), with a container
+image (`Dockerfile`) and an env-driven entrypoint
+(`npm run start:gateway`). A Redis-backed shared session registry is the
+production-ready backend for horizontal, multi-gateway deployments and fails
+closed on outage. Deployment topologies (local Docker, single-host, externally
+managed) and the recommended canary topology are documented in
+[docs/deployment-guide.md](./docs/deployment-guide.md).
+
+It is a *candidate* rather than fully production-ready because the gateway has no
+built-in authentication (it must run behind an authenticating/TLS proxy), the
+Phase 4 self-optimization telemetry gate is not yet satisfied, and observability
+is operator-polled JSON rather than a scrapeable metrics surface. The remaining
+near-term hardening and the long-term research split are tracked in
+[docs/runtime-fabric-roadmap.md](./docs/runtime-fabric-roadmap.md). Reserved
+runtime modes (`soft_sticky`, `pinned`, `hybrid`) remain unimplemented and
+rejected at the boundary; see
+[docs/mode-recovery-matrix.md](./docs/mode-recovery-matrix.md).
 
 What still remains outside the official SDK path:
 

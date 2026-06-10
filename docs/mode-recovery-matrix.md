@@ -61,6 +61,39 @@ The fabric does not currently implement hot context checkpointing, live state
 migration, automatic runtime-local state rehydration, or self-optimizing
 placement.
 
+### Pre-Implementation Requirements (design note / TODO)
+
+`soft_sticky`, `pinned`, and `hybrid` remain **reserved** as of this revision.
+`normalizeRuntimeMode` accepts only `stateless` and `sticky`; any other value is
+rejected with a client error, and that guard must stay until a reserved mode has
+a complete, tested contract. This section is a TODO, not an implementation plan:
+it records what must be specified *before* any of these modes is implemented. Do
+not implement these modes from this document.
+
+Before **any** reserved mode is implemented, the following must be specified and
+test-covered (these are common to all three):
+
+- A written placement contract (when affinity is created, preserved, and broken)
+  and the corresponding rows added to the Recovery Behavior table above.
+- Explicit failure semantics on instance loss, registry outage, reconnect grace
+  expiry, and TTL expiry — including whether the gateway may retry on another
+  instance and what the client must do.
+- How explicit overrides and existing stored modes interact with the new mode,
+  and a migration/rollback path that keeps `stateless`/`sticky` behavior intact.
+- Adaptive-placement eligibility: whether the classifier may ever select the
+  mode, or whether it is explicit-only.
+
+Per-mode open questions that must be answered first:
+
+| Mode | Must be specified before implementation |
+| --- | --- |
+| `soft_sticky` | Preference strength vs `sticky`; the exact condition and timing that triggers fallback to another instance; whether any state hydration is promised on fallback (and who owns it); how a client learns its affinity was downgraded. |
+| `pinned` | Ownership model and lifetime of the pinned resource (terminal, subprocess, browser, GPU context); behavior when the pinned instance dies (hard fail vs. error contract); the no-retry guarantee and how it is enforced; capacity/back-pressure when no instance can accept a new pin. |
+| `hybrid` | The external-state reference format; the application-owned restore/hydration hook contract; partial-rehydration semantics and failure modes; migration limits and when the fabric refuses to migrate. |
+
+Until each row above is answered, specified in this matrix, and backed by tests,
+the reserved modes stay rejected at the boundary.
+
 ## Validation References
 
 The implemented recovery behavior is covered by the Phase 2 and Phase 3

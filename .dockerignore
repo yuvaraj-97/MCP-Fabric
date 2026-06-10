@@ -1,0 +1,11 @@
+node_modules
+validation-artifacts
+examples/multi-container-proof
+.git
+.env
+*.md
+docs
+tests
+validation
+apps
+examples
