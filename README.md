@@ -117,6 +117,8 @@ The implemented slices today are:
   opt-in `stateless` request/session metadata
 - Phase 2 recommendation-only runtime classifier diagnostics with structured
   reasons, scores, and observability events
+- Phase 3 adaptive placement behind a default-off operator gate, with canary
+  allowlists, rollback guidance, and local staging evidence
 - self-explaining local dashboard for routing behavior
 - automated tests for core dispatch, `stdio` transport behavior, stickiness,
   HTTP/SSE parity, overload protection, unhealthy-instance reassignment, SSE
@@ -137,6 +139,9 @@ The concrete next-phase deployment proof is documented in
 The approved planning baseline for the adaptive runtime fabric direction is
 documented in
 [docs/adaptive-runtime-fabric-decisions.md](./docs/adaptive-runtime-fabric-decisions.md).
+The active next phase is telemetry validation before any Phase 4
+self-optimization, documented in
+[docs/phase-4-telemetry-validation.md](./docs/phase-4-telemetry-validation.md).
 The execution model for using Codex, Claude, and Antigravity together is
 documented in
 [docs/multi-agent-execution-plan.md](./docs/multi-agent-execution-plan.md).

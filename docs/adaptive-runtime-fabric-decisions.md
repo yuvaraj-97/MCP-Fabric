@@ -91,8 +91,10 @@ immediately.
    `stateless` and `sticky` modes; external canary telemetry remains required
    before widening rollout or making production claims.
 
-   Phase 4 remains deferred until production-like telemetry validates adaptive
-   placement quality across real workloads.
+   Phase 4 self-optimization remains deferred until production-like telemetry
+   validates adaptive placement quality across real workloads. The active
+   preparation work is documented in
+   [`phase-4-telemetry-validation.md`](./phase-4-telemetry-validation.md).
 
 9. **Classifier signal sources**
 

@@ -8,6 +8,9 @@ const report = await runMemoryMulticontainerProof({
     process.env.MCP_MEMORY_MULTICONTAINER_SERVER_URLS ??
       process.env.MCP_MULTICONTAINER_SERVER_URLS,
   ),
+  storeFile:
+    process.env.MCP_MEMORY_MULTICONTAINER_STORE_FILE ??
+    process.env.MCP_MULTICONTAINER_MEMORY_STORE_FILE,
   cleanup:
     process.env.MCP_MEMORY_MULTICONTAINER_KEEP_ARTIFACTS !== "1" &&
     process.env.MCP_MULTICONTAINER_KEEP_ARTIFACTS !== "1",

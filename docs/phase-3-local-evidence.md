@@ -17,11 +17,13 @@ operator flag, allowlist, explicit override behavior, rollback path,
 observability, recovery matrix, and remote-process proofs are in place.
 
 Stage 6 has local telemetry evidence through the load, real-workload,
-sustained, remote-process, and shared-Redis validations. It is not closed for
-production rollout until the external canary gate below runs against a live
-gateway fleet.
+sustained, remote-process, and shared-Redis validations. A Docker-backed local
+staging external canary also passed with run ID `20260610-150232-staging`.
+Phase 4 self-optimization remains deferred; the active next phase is telemetry
+validation as documented in
+[`phase-4-telemetry-validation.md`](./phase-4-telemetry-validation.md).
 
-The remaining Phase 3 rollout gate is external: run the
+The Phase 3 rollout gate is external: run the
 [`phase-3-external-canary-runbook.md`](./phase-3-external-canary-runbook.md)
 against real traffic, compare the Phase 2 baseline against adaptive-placement
 traffic, and widen the allowlist only while mismatches remain zero and fallback
@@ -41,6 +43,7 @@ reasons are explained.
 | Remote git adaptive placement | `npm run validate:git:multicontainer:adaptive`; Docker git adaptive proof | Complete |
 | Remote memory adaptive placement | `npm run validate:memory:multicontainer:adaptive`; Docker memory adaptive proof | Complete |
 | Cross-gateway adaptive metadata | `npm run validate:shared-redis:adaptive`; Docker shared-Redis adaptive proof | Complete |
+| Docker staging external canary | Run ID `20260610-150232-staging`; baseline, canary, rollback, machine verifier, and final approval verifier passed | Complete for local staging |
 | Recovery behavior per mode | [`mode-recovery-matrix.md`](./mode-recovery-matrix.md) | Complete |
 | Phase 2 regression guard | `npm test`; Phase 2 production-gate commands before widening | Complete locally |
 
@@ -51,6 +54,7 @@ reasons are explained.
 - PR #11: shared-Redis adaptive metadata proof.
 - PR #12: remote memory adaptive placement proof.
 - PR #13: remote git adaptive placement proof.
+- Issue #20: Docker-backed local staging external canary completed and closed.
 
 ## External Canary Gate
 
@@ -69,6 +73,11 @@ Before making adaptive placement broader than an internal allowlist:
    - no increase in downstream application errors versus the Phase 2 baseline.
 5. Widen the allowlist only while the mismatch count remains zero and all
    fallback reasons are expected.
+
+The local staging canary closes the repository-side Phase 3 gate for the
+available Docker topology. It is not a production claim and does not remove the
+need to rerun the runbook for any future production or hosted staging
+environment.
 
 ## Not Claimed
 
