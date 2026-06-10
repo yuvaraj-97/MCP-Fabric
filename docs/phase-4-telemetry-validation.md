@@ -109,6 +109,27 @@ Run cross-gateway metadata evidence:
 npm run validate:shared-redis:adaptive
 ```
 
+Build an operator-facing quality summary from any captured external canary
+evidence directory:
+
+```sh
+MCP_PHASE4_TELEMETRY_EVIDENCE_DIR=validation-artifacts/phase-3-external-canary/20260610-150232-staging \
+npm run validate:adaptive-placement:telemetry-summary
+```
+
+The summary exits non-zero unless mismatch count is zero, invalid-classifier
+fallback count is zero, all fallback sources are explainable, downstream error
+evidence does not exceed its captured baseline plus delta, and retained heap
+evidence does not exceed its captured ceiling. Additional JSON reports can be
+supplied with `MCP_PHASE4_TELEMETRY_INPUTS` as a comma-separated file or
+directory list.
+
+To require a minimum high-confidence recommendation ratio, set:
+
+```sh
+MCP_PHASE4_TELEMETRY_MIN_HIGH_CONFIDENCE_RATIO=1
+```
+
 In Docker-capable environments, run the shared-Redis Docker topology before
 making horizontal gateway claims:
 

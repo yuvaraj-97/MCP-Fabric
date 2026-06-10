@@ -31,6 +31,7 @@
     "validate:adaptive-placement:external-canary:plan": "node validation/adaptive-placement/run-plan-external-canary.js",
     "validate:adaptive-placement:external-canary:evidence": "node validation/adaptive-placement/run-external-canary-evidence.js",
     "validate:adaptive-placement:external-canary:verify": "node validation/adaptive-placement/run-verify-external-canary-evidence.js",
+    "validate:adaptive-placement:telemetry-summary": "node validation/adaptive-placement/run-telemetry-summary.js",
     "validate:shared-redis": "node validation/shared-redis/run-proof.js",
     "validate:shared-redis:adaptive": "MCP_SHARED_REDIS_ADAPTIVE_PLACEMENT=1 node validation/shared-redis/run-proof.js",
     "validate:burst-memory": "node --expose-gc validation/burst-memory/run-proof.js",
