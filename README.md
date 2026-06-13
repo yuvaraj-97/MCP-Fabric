@@ -70,49 +70,64 @@ That proof verifies:
 - unhealthy-instance reassignment still preserves the workload state;
 - gateway observability records the lifecycle.
 
-For laptop development, choose the transport surface deliberately:
+For laptop development, choose the transport explicitly in Python with
+`LocalFabric(transport=...)`.
 
-- Use `LocalFabricGateway` when you want to run the HTTP/SSE gateway locally.
-  This is the best default for Python app development because it exercises the
-  same routing, session stickiness, observability, and recovery layer used by
-  remote deployments.
-- Use the bundled stdio scripts/proofs when you specifically want to validate
-  local stdio behavior for an MCP host that launches a process directly.
-
-Local HTTP/SSE gateway from Python:
+Local HTTP/SSE gateway. Use this when you want laptop development to exercise
+the same gateway surface used by remote deployments:
 
 ```python
-from mcp_fabric import LocalFabricGateway
+from mcp_fabric import LocalFabric
 
-with LocalFabricGateway() as fabric:
+with LocalFabric(transport="http-sse") as fabric:
     client = fabric.client()
     session = client.initialize(client_id="python-user")
 
     result = client.tools_call(
         session.session_id,
         name="echo",
-        arguments={"message": "hello from the same gateway runtime"},
+        arguments={"message": "hello from the HTTP/SSE gateway"},
     )
 
     print(result)
 ```
 
-Local stdio validation from the Python-installed runtime:
+Local stdio. Use this when the MCP host is expected to launch a local process
+and communicate over stdio:
 
-```sh
-mcp-fabric runtime run demo:stdio
+```python
+from mcp_fabric import LocalFabric
+
+with LocalFabric(transport="stdio") as fabric:
+    client = fabric.client()
+    session = client.initialize(client_id="python-user")
+
+    result = client.tools_call(
+        session.session_id,
+        name="echo",
+        arguments={"message": "hello from stdio"},
+    )
+
+    print(result)
 ```
 
-or, to prove the same application behavior across both stdio and HTTP/SSE:
+The code shape is intentionally similar: initialize a session, list tools, call
+tools. The transport choice changes one argument:
+
+| Transport | Python code | What it starts |
+| --- | --- | --- |
+| HTTP/SSE gateway | `LocalFabric(transport="http-sse")` | local gateway HTTP server on localhost |
+| stdio | `LocalFabric(transport="stdio")` | local Node stdio server subprocess |
+
+To prove the same application behavior across both stdio and HTTP/SSE:
 
 ```sh
 mcp-fabric runtime run validate:filesystem
 ```
 
-The important point: Python controls and consumes the runtime, but
-`LocalFabricGateway` is intentionally the HTTP/SSE gateway API. The
-transport-neutral MCP implementation remains shared by stdio and HTTP/SSE
-inside the bundled runtime.
+The important point: Python controls and consumes the runtime, and the user can
+select the local transport explicitly. The transport-neutral MCP implementation
+remains shared by stdio and HTTP/SSE inside the bundled runtime.
 
 ## AI Agent Context
 
@@ -124,8 +139,10 @@ project: MCP-Fabric
 install_for_python_users: pip install mcp-fabric
 primary_import: mcp_fabric
 primary_python_classes:
+  - LocalFabric
   - FabricClient
   - LocalFabricGateway
+  - LocalStdioServer
 runtime_language: JavaScript / Node.js
 control_language: Python
 node_requirement: ">=20"
@@ -139,7 +156,9 @@ source_of_truth:
   observability: JavaScript runtime
   lifecycle_control: Python wrapper and CLI
 best_first_command: mcp-fabric validate
-best_local_gateway_api: LocalFabricGateway()
+best_local_runtime_api: LocalFabric(transport="http-sse" | "stdio")
+best_local_gateway_api: LocalFabric(transport="http-sse")
+best_local_stdio_api: LocalFabric(transport="stdio")
 best_remote_gateway_api: FabricClient("https://gateway.example.com")
 ```
 
@@ -153,9 +172,9 @@ mcp-fabric validate
 Recommended AI-generated starter code:
 
 ```python
-from mcp_fabric import LocalFabricGateway
+from mcp_fabric import LocalFabric
 
-with LocalFabricGateway() as fabric:
+with LocalFabric(transport="http-sse") as fabric:
     client = fabric.client()
     session = client.initialize(client_id="python-user")
     result = client.tools_call(
@@ -169,6 +188,69 @@ with LocalFabricGateway() as fabric:
 Do not tell Python users to clone this repository for the basic local gateway
 path. Do tell them they need Node.js `>=20`, because the proven gateway runtime
 is Node-based and intentionally remains the source of truth.
+
+## Python Customization Model
+
+The Python layer is not intended to hide the runtime's operator controls. It
+provides:
+
+- typed Python arguments for common runtime choices;
+- `env={...}` pass-through for any current or future Node/operator setting.
+
+Example with gateway routing, lifecycle, registry, and adaptive-placement
+configuration:
+
+```python
+from mcp_fabric import LocalFabric
+
+with LocalFabric(
+    transport="http-sse",
+    host="127.0.0.1",
+    port=4400,
+    server_count=4,
+    load_threshold=0.65,
+    session_ttl_ms=120_000,
+    reconnect_grace_ms=15_000,
+    on_disconnect="queue",
+    session_registry_backend="redis",
+    redis_url="redis://127.0.0.1:6379/0",
+    adaptive_placement=True,
+    adaptive_placement_client_allowlist=["python-user"],
+    env={
+        # Escape hatch for any runtime variable not yet promoted to a
+        # first-class Python argument.
+        "MCP_GATEWAY_AUTOSCALE_THRESHOLD": "0.85",
+    },
+) as fabric:
+    client = fabric.client()
+    session = client.initialize(client_id="python-user")
+```
+
+Stdio can also receive environment customizations:
+
+```python
+from mcp_fabric import LocalFabric
+
+with LocalFabric(
+    transport="stdio",
+    server_instance_id="local-stdio-a",
+    env={"CUSTOM_WORKLOAD_ROOT": "/tmp/mcp-workload"},
+) as fabric:
+    client = fabric.client()
+```
+
+CLI commands also accept env pass-through:
+
+```sh
+mcp-fabric gateway start --env MCP_GATEWAY_ON_DISCONNECT=queue
+mcp-fabric runtime run validate:filesystem --env MCP_GATEWAY_SESSION_TTL_MS=120000
+```
+
+When a local runtime starts, MCP-Fabric prints a single structured configuration
+line to stderr. It marks each option as `default`, `runtime-default`, `auto`,
+`user`, or `resolved`, and redacts sensitive env values. This is intentional: if
+a laptop run fails, users and AI assistants can see which defaults were selected
+without digging through source code.
 
 ## What MCP-Fabric Provides
 
@@ -193,11 +275,11 @@ is Node-based and intentionally remains the source of truth.
 | Install path | `pip install mcp-fabric` | `git clone` and `npm install` |
 | Primary audience | AI/ML engineers and Python application developers | Runtime contributors, operators, and Node.js developers |
 | Runtime implementation | Bundled Node.js runtime controlled from Python | Node.js runtime directly from the repo |
-| Python API | `FabricClient`, `LocalFabricGateway` | Not the primary interface |
+| Python API | `FabricClient`, `LocalFabric(transport=...)`, `LocalFabricGateway`, `LocalStdioServer` | Not the primary interface |
 | Manual npm commands | Not for normal Python use; Python runs managed bootstrap | Yes |
 | Node.js dependency | Required: Node.js `>=20` and npm | Required: Node.js `>=20` and npm |
 | Dependency bootstrap | Managed `npm ci --omit=dev` inside the installed runtime payload | `npm install` |
-| Local gateway | `mcp-fabric gateway start` or `LocalFabricGateway()` | `npm run start:gateway` |
+| Local gateway | `mcp-fabric gateway start` or `LocalFabric(transport="http-sse")` | `npm run start:gateway` |
 | Remote gateway client | `FabricClient("https://gateway.example.com")` | Direct HTTP or custom client code |
 | Dashboard | `mcp-fabric dashboard` | `npm run demo` |
 | Full runtime script list | `mcp-fabric runtime list-scripts` | `npm run` / `package.json` |
@@ -208,7 +290,7 @@ is Node-based and intentionally remains the source of truth.
 | Shared Redis proof | `mcp-fabric runtime run validate:shared-redis` | `npm run validate:shared-redis` |
 | Adaptive placement proofs | `mcp-fabric runtime run validate:adaptive-placement` and related scripts | `npm run validate:adaptive-placement` and related scripts |
 | Transport-neutral app logic | Same bundled runtime code | Source runtime code |
-| Same app over stdio and HTTP/SSE | Validated through bundled scripts | Validated through repo scripts |
+| Same app over stdio and HTTP/SSE | `LocalFabric(transport="stdio")`, `LocalFabric(transport="http-sse")`, and bundled validation scripts | Validated through repo scripts |
 | HTTP/SSE gateway | Same bundled runtime | Source runtime |
 | stdio transport adapter | Same bundled runtime | Source runtime |
 | Session stickiness, TTL, reconnect recovery | Same bundled runtime | Source runtime |
@@ -234,9 +316,9 @@ Users do not need to run `npm install` or `npm run ...` manually for the Python
 local gateway path.
 
 ```python
-from mcp_fabric import LocalFabricGateway
+from mcp_fabric import LocalFabric
 
-with LocalFabricGateway() as fabric:
+with LocalFabric(transport="http-sse") as fabric:
     client = fabric.client()
 
     session = client.initialize(client_id="python-user")

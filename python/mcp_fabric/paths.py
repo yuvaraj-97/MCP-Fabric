@@ -22,3 +22,8 @@ def bundled_runtime_dir() -> Path:
 def standalone_gateway_entrypoint(runtime_dir: Path | None = None) -> Path:
     root = runtime_dir or bundled_runtime_dir()
     return root / "packages" / "gateway" / "bin" / "standalone-gateway.js"
+
+
+def stdio_server_entrypoint(runtime_dir: Path | None = None) -> Path:
+    root = runtime_dir or bundled_runtime_dir()
+    return root / "packages" / "transports" / "stdio" / "stdio-server.js"

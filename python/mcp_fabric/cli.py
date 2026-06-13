@@ -22,16 +22,19 @@ def main(argv: list[str] | None = None) -> int:
     gateway_start.add_argument("--port", type=int)
     gateway_start.add_argument("--adaptive-placement", action="store_true")
     gateway_start.add_argument("--redis-url")
+    gateway_start.add_argument("--env", action="append", default=[], metavar="KEY=VALUE")
 
     dashboard = subparsers.add_parser("dashboard")
     dashboard.add_argument("--host", default="127.0.0.1")
     dashboard.add_argument("--port", type=int, default=4321)
+    dashboard.add_argument("--env", action="append", default=[], metavar="KEY=VALUE")
 
     runtime = subparsers.add_parser("runtime")
     runtime_subparsers = runtime.add_subparsers(dest="runtime_command", required=True)
     runtime_subparsers.add_parser("list-scripts")
     runtime_run = runtime_subparsers.add_parser("run")
     runtime_run.add_argument("script")
+    runtime_run.add_argument("--env", action="append", default=[], metavar="KEY=VALUE")
     runtime_run.add_argument("script_args", nargs=argparse.REMAINDER)
 
     subparsers.add_parser("test")
@@ -51,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_runtime_npm_script(
             "demo",
             env={
+                **parse_env_pairs(args.env),
                 "HOST": args.host,
                 "PORT": str(args.port),
             },
@@ -68,7 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         script_args = args.script_args
         if script_args and script_args[0] == "--":
             script_args = script_args[1:]
-        return run_runtime_npm_script(args.script, args=script_args)
+        return run_runtime_npm_script(
+            args.script,
+            args=script_args,
+            env=parse_env_pairs(args.env),
+        )
 
     if args.command == "test":
         return run_runtime_npm_script("test")
@@ -83,6 +91,7 @@ def gateway_start_foreground(args: argparse.Namespace) -> int:
         port=args.port,
         adaptive_placement=args.adaptive_placement,
         redis_url=args.redis_url,
+        env=parse_env_pairs(args.env),
     )
     stopping = False
 
@@ -101,6 +110,19 @@ def gateway_start_foreground(args: argparse.Namespace) -> int:
             return int(fabric.process.returncode or 0)
         time.sleep(0.25)
     return 0
+
+
+def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
+    parsed = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"--env must be KEY=VALUE, got: {pair}")
+        key, value = pair.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise SystemExit("--env key must not be empty")
+        parsed[key] = value
+    return parsed
 
 
 if __name__ == "__main__":
