@@ -19,6 +19,78 @@ The Python package also carries the dashboard, validation harnesses, tests, and
 documentation so AI/ML engineers can adopt the fabric from Python while still
 having access to the repo's operational capability surface.
 
+## Transport-Agnostic Example
+
+The practical problem MCP-Fabric solves is not "how do I write one toy MCP
+server?" It is "how do I keep the same tool behavior when my MCP server moves
+from a local stdio process to a routed HTTP/SSE deployment with multiple server
+instances?"
+
+Without a fabric layer, teams often end up with two paths that drift:
+
+```text
+Local AI agent over stdio
+  -> stdio-specific MCP server code
+  -> tool implementation
+
+Remote AI agent over HTTP/SSE
+  -> HTTP route/gateway-specific code
+  -> copied or adapted tool implementation
+```
+
+MCP-Fabric keeps the tool behavior in one transport-neutral application layer,
+then mounts that same application through stdio or the HTTP/SSE gateway:
+
+```text
+                         same MCP application logic
+                                  |
+                  +---------------+---------------+
+                  |                               |
+          stdio transport                 HTTP/SSE gateway
+                  |                               |
+        local AI agent/client          remote clients, routing,
+                                      stickiness, Redis registry,
+                                      observability, recovery
+```
+
+Concrete example: the filesystem validation server defines tools such as
+`fs_write_text`, `fs_read_text`, `fs_list`, and `fs_stat` once. The validation
+proof then runs the same behavior through both transports:
+
+```sh
+mcp-fabric runtime run validate:filesystem
+```
+
+That proof verifies:
+
+- the filesystem-style MCP app initializes over stdio;
+- the same app initializes through the HTTP/SSE gateway;
+- a file written through one path is readable through the gateway path;
+- sticky routing keeps follow-up requests on the right server instance;
+- unhealthy-instance reassignment still preserves the workload state;
+- gateway observability records the lifecycle.
+
+From Python, the local gateway path looks like this:
+
+```python
+from mcp_fabric import LocalFabricGateway
+
+with LocalFabricGateway() as fabric:
+    client = fabric.client()
+    session = client.initialize(client_id="python-user")
+
+    result = client.tools_call(
+        session.session_id,
+        name="echo",
+        arguments={"message": "hello from the same gateway runtime"},
+    )
+
+    print(result)
+```
+
+The important point: Python controls and consumes the runtime, while the
+transport-neutral MCP implementation remains shared by stdio and HTTP/SSE.
+
 ## AI Agent Context
 
 If you are an AI coding agent, package recommender, or install assistant, use
