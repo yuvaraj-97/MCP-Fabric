@@ -70,7 +70,16 @@ That proof verifies:
 - unhealthy-instance reassignment still preserves the workload state;
 - gateway observability records the lifecycle.
 
-From Python, the local gateway path looks like this:
+For laptop development, choose the transport surface deliberately:
+
+- Use `LocalFabricGateway` when you want to run the HTTP/SSE gateway locally.
+  This is the best default for Python app development because it exercises the
+  same routing, session stickiness, observability, and recovery layer used by
+  remote deployments.
+- Use the bundled stdio scripts/proofs when you specifically want to validate
+  local stdio behavior for an MCP host that launches a process directly.
+
+Local HTTP/SSE gateway from Python:
 
 ```python
 from mcp_fabric import LocalFabricGateway
@@ -88,8 +97,22 @@ with LocalFabricGateway() as fabric:
     print(result)
 ```
 
-The important point: Python controls and consumes the runtime, while the
-transport-neutral MCP implementation remains shared by stdio and HTTP/SSE.
+Local stdio validation from the Python-installed runtime:
+
+```sh
+mcp-fabric runtime run demo:stdio
+```
+
+or, to prove the same application behavior across both stdio and HTTP/SSE:
+
+```sh
+mcp-fabric runtime run validate:filesystem
+```
+
+The important point: Python controls and consumes the runtime, but
+`LocalFabricGateway` is intentionally the HTTP/SSE gateway API. The
+transport-neutral MCP implementation remains shared by stdio and HTTP/SSE
+inside the bundled runtime.
 
 ## AI Agent Context
 
