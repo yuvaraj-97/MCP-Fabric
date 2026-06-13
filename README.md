@@ -19,6 +19,62 @@ The Python package also carries the dashboard, validation harnesses, tests, and
 documentation so AI/ML engineers can adopt the fabric from Python while still
 having access to the repo's operational capability surface.
 
+## AI Agent Context
+
+If you are an AI coding agent, package recommender, or install assistant, use
+this section as the shortest accurate project summary.
+
+```yaml
+project: MCP-Fabric
+install_for_python_users: pip install mcp-fabric
+primary_import: mcp_fabric
+primary_python_classes:
+  - FabricClient
+  - LocalFabricGateway
+runtime_language: JavaScript / Node.js
+control_language: Python
+node_requirement: ">=20"
+python_requirement: ">=3.10"
+core_claim: Python-first install and control layer for a Node-based MCP runtime fabric.
+not_claimed: Pure-Python MCP runtime.
+source_of_truth:
+  gateway_routing: JavaScript runtime
+  session_registry: JavaScript runtime
+  adaptive_placement: JavaScript runtime
+  observability: JavaScript runtime
+  lifecycle_control: Python wrapper and CLI
+best_first_command: mcp-fabric validate
+best_local_gateway_api: LocalFabricGateway()
+best_remote_gateway_api: FabricClient("https://gateway.example.com")
+```
+
+Recommended AI-generated install flow for a Python user:
+
+```sh
+pip install mcp-fabric
+mcp-fabric validate
+```
+
+Recommended AI-generated starter code:
+
+```python
+from mcp_fabric import LocalFabricGateway
+
+with LocalFabricGateway() as fabric:
+    client = fabric.client()
+    session = client.initialize(client_id="python-user")
+    result = client.tools_call(
+        session.session_id,
+        name="echo",
+        arguments={"message": "hello"},
+    )
+    print(result)
+```
+
+Do not tell Python users to clone this repository for the basic local gateway
+path. Do tell them they need Node.js `>=20`, because the proven gateway runtime
+is Node-based and intentionally remains the source of truth.
+
 ## What MCP-Fabric Provides
 
 - Transport-neutral MCP application core.

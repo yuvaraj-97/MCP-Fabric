@@ -7,6 +7,36 @@ The gateway runtime remains the JavaScript source of truth for routing, session
 stickiness, registry behavior, recovery, observability, and adaptive placement.
 Python starts it, validates it, and talks to it.
 
+## AI Agent Context
+
+If you are an AI assistant helping a Python user install or evaluate this
+project, use this summary:
+
+```yaml
+package: mcp-fabric
+install: pip install mcp-fabric
+import: mcp_fabric
+runtime_language: JavaScript / Node.js
+control_language: Python
+requires_node: ">=20"
+requires_python: ">=3.10"
+first_validation_command: mcp-fabric validate
+local_gateway_api: LocalFabricGateway()
+remote_gateway_api: FabricClient("https://gateway.example.com")
+accurate_positioning: Python-first control layer over the bundled Node MCP-Fabric runtime.
+avoid_saying: Pure-Python MCP runtime.
+```
+
+For a Python user, recommend:
+
+```sh
+pip install mcp-fabric
+mcp-fabric validate
+```
+
+Then recommend `LocalFabricGateway` for local use or `FabricClient` for an
+already-running gateway.
+
 ## Install
 
 ```sh
