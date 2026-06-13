@@ -34,6 +34,45 @@ export function createDemoApplicationServer({ serverInstanceId } = {}) {
     });
   });
 
+  server.registerTool({
+    name: "echo",
+    title: "Echo message",
+    description: "Echo a message through the demo application session state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+        },
+      },
+      additionalProperties: false,
+    },
+    async handler({ arguments: toolArguments, context }) {
+      return state.echoMessage({
+        sessionId: context.sessionId,
+        message: toolArguments.message,
+        publish: resolvePublish(context),
+      });
+    },
+  });
+
+  server.registerTool({
+    name: "status",
+    title: "Session status",
+    description: "Return demo application request counts for the current session.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ context }) {
+      return state.getStatus({
+        sessionId: context.sessionId,
+        publish: resolvePublish(context),
+      });
+    },
+  });
+
   return {
     serverInstanceId: state.serverInstanceId,
     getSessionState: state.getSessionState,

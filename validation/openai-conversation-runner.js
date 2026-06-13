@@ -30,7 +30,7 @@ export class OpenAIConversationRunner {
   describe() {
     const base = this.#baseRunner.describe();
     const baseState = this.#baseRunner.getState();
-    const apiKeyAvailable = Boolean(resolveOpenAIApiKey());
+    const apiKeyAvailable = Boolean(this.#client) || Boolean(resolveOpenAIApiKey());
     return {
       id: this.#scenarioId,
       targetId: base.targetId,

@@ -51,3 +51,37 @@ test("demo application server emits consistent JSON-RPC success envelopes", asyn
   assert.equal(echoed.result.message, "hello");
   assert.equal(echoed.result.requestCount, 1);
 });
+
+test("demo application server exposes echo through the MCP tool surface", async () => {
+  const server = createDemoApplicationServer({ serverInstanceId: "server-a" });
+
+  const initialized = await server.handleMessage({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+  });
+  const tools = await server.handleMessage({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/list",
+    sessionId: initialized.result.sessionId,
+  });
+  const echoed = await server.handleMessage({
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    sessionId: initialized.result.sessionId,
+    params: {
+      name: "echo",
+      arguments: { message: "hello" },
+    },
+  });
+
+  assert.deepEqual(
+    tools.result.tools.map((tool) => tool.name).sort(),
+    ["echo", "status"],
+  );
+  assert.equal(echoed.result.isError, false);
+  assert.equal(echoed.result.structuredContent.message, "hello");
+  assert.equal(echoed.result.structuredContent.serverInstanceId, "server-a");
+});

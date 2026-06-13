@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-fabric"
+version = "0.2.0"
+description = "Python-first install and control surface for the MCP-Fabric gateway runtime."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "UNLICENSED" }
+authors = [{ name = "MCP-Fabric maintainers" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/yuvaraj-97/MCP-Fabric"
+Repository = "https://github.com/yuvaraj-97/MCP-Fabric"
+Issues = "https://github.com/yuvaraj-97/MCP-Fabric/issues"
+
+[project.scripts]
+mcp-fabric = "mcp_fabric.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_fabric"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../package.json" = "mcp_fabric/_bundled/package.json"
+"../package-lock.json" = "mcp_fabric/_bundled/package-lock.json"
+"../README.md" = "mcp_fabric/_bundled/REPOSITORY_README.md"
+"../Dockerfile" = "mcp_fabric/_bundled/Dockerfile"
+"../apps" = "mcp_fabric/_bundled/apps"
+"../docs" = "mcp_fabric/_bundled/docs"
+"../examples/shared" = "mcp_fabric/_bundled/examples/shared"
+"../examples/stdio-server" = "mcp_fabric/_bundled/examples/stdio-server"
+"../examples/http-sse-server" = "mcp_fabric/_bundled/examples/http-sse-server"
+"../examples/multi-server-load-balanced-demo" = "mcp_fabric/_bundled/examples/multi-server-load-balanced-demo"
+"../packages" = "mcp_fabric/_bundled/packages"
+"../tests" = "mcp_fabric/_bundled/tests"
+"../validation" = "mcp_fabric/_bundled/validation"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
