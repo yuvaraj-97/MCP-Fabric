@@ -70,15 +70,14 @@ That proof verifies:
 - unhealthy-instance reassignment still preserves the workload state;
 - gateway observability records the lifecycle.
 
-For laptop development, choose the transport explicitly in Python with
-`LocalFabric(transport=...)`.
-
-Local HTTP/SSE gateway. Use this when you want laptop development to exercise
-the same gateway surface used by remote deployments:
+For laptop development, the application code stays the same. The transport is a
+runtime choice:
 
 ```python
 from mcp_fabric import LocalFabric
 
+# Use transport="stdio" when the MCP host should launch a local stdio process.
+# Use transport="http-sse" when you want the routed HTTP/SSE gateway path.
 with LocalFabric(transport="http-sse") as fabric:
     client = fabric.client()
     session = client.initialize(client_id="python-user")
@@ -86,33 +85,58 @@ with LocalFabric(transport="http-sse") as fabric:
     result = client.tools_call(
         session.session_id,
         name="echo",
-        arguments={"message": "hello from the HTTP/SSE gateway"},
+        arguments={"message": "same app code, different transport"},
     )
 
     print(result)
 ```
 
-Local stdio. Use this when the MCP host is expected to launch a local process
-and communicate over stdio:
+Without MCP-Fabric, teams usually end up maintaining transport-specific client
+plumbing. The HTTP/SSE path has request/session/retry code:
 
 ```python
-from mcp_fabric import LocalFabric
+import requests
 
-with LocalFabric(transport="stdio") as fabric:
-    client = fabric.client()
-    session = client.initialize(client_id="python-user")
+base_url = "http://127.0.0.1:4400"
+session = requests.post(
+    f"{base_url}/initialize",
+    json={"clientId": "python-user"},
+    timeout=10,
+).json()
 
-    result = client.tools_call(
-        session.session_id,
-        name="echo",
-        arguments={"message": "hello from stdio"},
-    )
-
-    print(result)
+result = requests.post(
+    f"{base_url}/sessions/{session['sessionId']}/tools/call",
+    json={"name": "echo", "arguments": {"message": "hello"}},
+    timeout=10,
+).json()
 ```
 
-The code shape is intentionally similar: initialize a session, list tools, call
-tools. The transport choice changes one argument:
+The stdio path has a different subprocess and JSON-lines protocol:
+
+```python
+import json
+import subprocess
+
+process = subprocess.Popen(
+    ["node", "stdio-server.js"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    text=True,
+)
+
+process.stdin.write(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {"clientId": "python-user"},
+}) + "\n")
+process.stdin.flush()
+session = json.loads(process.stdout.readline())
+```
+
+Those two paths are not just more code. They create two places for lifecycle,
+timeouts, logging, session handling, and tool-call behavior to drift. MCP-Fabric
+collapses that into one Python-facing contract:
 
 | Transport | Python code | What it starts |
 | --- | --- | --- |

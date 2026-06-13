@@ -54,25 +54,76 @@ required for the Python local gateway path. When the gateway runtime starts, the
 Python package verifies the bundled runtime dependencies and runs managed
 bootstrap with `npm ci --omit=dev` if needed.
 
-## Local Gateway
+## Same Code Across Local Transports
 
 ```python
 from mcp_fabric import LocalFabric
 
+# Use transport="stdio" when the MCP host should launch a local stdio process.
+# Use transport="http-sse" when you want the routed HTTP/SSE gateway path.
 with LocalFabric(transport="http-sse") as fabric:
     client = fabric.client()
-
     session = client.initialize(client_id="python-user")
-    tools = client.tools_list(session.session_id)
 
     result = client.tools_call(
         session.session_id,
         name="echo",
-        arguments={"message": "hello"},
+        arguments={"message": "same app code, different transport"},
     )
 
     print(result)
 ```
+
+Without MCP-Fabric, HTTP/SSE and stdio usually become separate code paths. HTTP
+uses request/session plumbing:
+
+```python
+import requests
+
+base_url = "http://127.0.0.1:4400"
+session = requests.post(
+    f"{base_url}/initialize",
+    json={"clientId": "python-user"},
+    timeout=10,
+).json()
+
+result = requests.post(
+    f"{base_url}/sessions/{session['sessionId']}/tools/call",
+    json={"name": "echo", "arguments": {"message": "hello"}},
+    timeout=10,
+).json()
+```
+
+Stdio uses subprocess and JSON-lines plumbing:
+
+```python
+import json
+import subprocess
+
+process = subprocess.Popen(
+    ["node", "stdio-server.js"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    text=True,
+)
+
+process.stdin.write(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {"clientId": "python-user"},
+}) + "\n")
+process.stdin.flush()
+session = json.loads(process.stdout.readline())
+```
+
+That duplicate plumbing is where timeouts, lifecycle, logging, session handling,
+and tool-call behavior drift. MCP-Fabric keeps those practices behind one Python
+contract and lets the transport change through `LocalFabric(transport=...)`.
+
+Use `LocalFabric(transport="http-sse")` for the local HTTP/SSE gateway path.
+Use `LocalFabric(transport="stdio")` when the MCP host should launch a local
+stdio process.
 
 ## Remote Gateway
 
@@ -82,26 +133,6 @@ from mcp_fabric import FabricClient
 client = FabricClient("https://gateway.example.com")
 print(client.health())
 ```
-
-## Local Stdio
-
-```python
-from mcp_fabric import LocalFabric
-
-with LocalFabric(transport="stdio") as fabric:
-    client = fabric.client()
-    session = client.initialize(client_id="python-user")
-    result = client.tools_call(
-        session.session_id,
-        name="echo",
-        arguments={"message": "hello from stdio"},
-    )
-    print(result)
-```
-
-Use `LocalFabric(transport="http-sse")` for the local HTTP/SSE gateway path.
-Use `LocalFabric(transport="stdio")` when the MCP host should launch a local
-stdio process.
 
 ## Custom Runtime Options
 
