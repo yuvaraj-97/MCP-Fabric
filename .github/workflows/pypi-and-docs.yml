@@ -1,0 +1,84 @@
+# GitHub Actions CI/CD Pipeline: PyPI Release & Documentation Versioning Workflow
+
+name: PyPI Publish & Multi-Version Docs Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  pypi-publish:
+    name: Build & Publish to PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Hatch & Build Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch build twine
+
+      - name: Extract Tag Version and Update pyproject.toml
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Building PyPI release for tag version: ${TAG_VERSION}"
+            sed -i "s/version = \".*\"/version = \"${TAG_VERSION}\"/" python/pyproject.toml
+            sed -i "s/release = \".*\"/release = \"${TAG_VERSION}\"/" docs/conf.py
+          fi
+
+      - name: Build Python Distribution Package (sdist & wheel)
+        run: |
+          cd python
+          python -m build
+
+      - name: Publish Package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist/
+          # Uses Trusted Publisher OIDC token configured on pypi.org for mcp-fabric
+
+  docs-multiversion-deploy:
+    name: Build Multi-Version Docs for Cloudflare / GitHub Pages
+    runs-on: ubuntu-latest
+    needs: pypi-publish
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Sphinx Multiversion & Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install sphinx furo myst-parser sphinx-copybutton sphinx-autodoc-typehints sphinx-multiversion
+
+      - name: Build Multi-Version Docs HTML
+        run: |
+          sphinx-multiversion docs docs/_build/html
+          cp docs/CNAME docs/_build/html/CNAME || true
+
+      - name: Upload Docs Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-multiversion-build
+          path: docs/_build/html/

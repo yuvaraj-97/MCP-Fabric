@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath('../python'))
 project = 'MCP Fabric'
 copyright = '2026, MCP Fabric Contributors'
 author = 'MCP Fabric Core Team'
-release = '0.3.0'
+release = '0.3.1'
 
 extensions = [
     'sphinx.ext.autodoc',
@@ -17,6 +17,7 @@ extensions = [
     'myst_parser',
     'sphinx_copybutton',
     'sphinx_autodoc_typehints',
+    'sphinx_multiversion',
 ]
 
 myst_enable_extensions = [
@@ -27,6 +28,13 @@ myst_enable_extensions = [
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+
+# sphinx-multiversion configuration
+smv_tag_whitelist = r'^v\d+\.\d+\.\d+$'
+smv_branch_whitelist = r'^(main|master)$'
+smv_remote_whitelist = r'^origin$'
+smv_released_pattern = r'^tags/v\d+\.\d+\.\d+$'
+smv_outputdir_format = '{ref.name}'
 
 html_theme = 'furo'
 html_theme_options = {
@@ -40,6 +48,17 @@ html_theme_options = {
         'color-brand-primary': '#f05738',
         'color-brand-content': '#f05738',
     },
+}
+
+html_sidebars = {
+    "**": [
+        "sidebar/brand.html",
+        "version-selector.html",
+        "sidebar/search.html",
+        "sidebar/scroll-start.html",
+        "sidebar/navigation.html",
+        "sidebar/scroll-end.html",
+    ]
 }
 
 html_static_path = ['_static']
