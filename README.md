@@ -1,6 +1,43 @@
 # MCP-Fabric
 
-MCP-Fabric is a production-oriented runtime fabric for MCP-compatible deployments. It keeps MCP application logic transport-neutral while supporting modern stateless MCP (2026-07-28) with high-performance routing, a stateless fast path, and workload-aware sticky routing (for handles like `browser_id`, `sandbox_id`, etc.) independently of legacy connection-level sessions.
+MCP-Fabric is a workload-aware runtime fabric for operating MCP workloads across stateless MCP infrastructure.
+
+## Positioning & Architectural Boundaries
+
+It is important to clearly distinguish the roles of the Model Context Protocol (MCP) and MCP-Fabric:
+
+* **MCP**:
+  * The protocol between clients and servers.
+  * Utilizes a stateless request model in the 2026-07-28 specification.
+* **MCP-Fabric**:
+  * Handles routing, workload affinity, and placement decisions.
+  * Manages recovery policies and worker lifecycles.
+  * Coordinates distributed workload state (via `WorkloadRegistry`).
+  * Implements observability, telemetry, and legacy compatibility.
+
+MCP-Fabric is not an alternative to or a replacement for the MCP protocol. Rather, it is the orchestration and execution fabric that runs and routes workloads for MCP servers.
+
+```text
+                      MCP-Fabric
+
+    +-----------------------------------------+
+    | Protocol Edge                           |
+    | MCP 2026-07-28 | legacy MCP | discovery |
+    +-----------------------------------------+
+    | Routing / Policy                        |
+    | method | name | workload | health/load  |
+    +-----------------------------------------+
+    | Workload Control Plane                  |
+    | registry | placement | recovery | TTL   |
+    +-----------------------------------------+
+    | Runtime Plane                           |
+    | MCP workers / sandboxes / processes     |
+    +-----------------------------------------+
+    | Observability                           |
+    | route / workload / trace / capacity     |
+    +-----------------------------------------+
+```
+
 
 The gateway runtime is implemented in Node.js. The primary user-facing install
 path is Python:

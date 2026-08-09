@@ -22,8 +22,8 @@ test("server/discover returns correct MCP 2026-07-28 discovery payload", async (
   assert.equal(response.id, "disc-1");
   assert.equal(response.result.resultType, "complete");
   assert.deepEqual(response.result.supportedVersions, ["2026-07-28", "2025-11-25"]);
-  assert.equal(response.result._meta["io.modelcontextprotocol/serverInfo"].name, "test-server");
-  assert.equal(response.result._meta["io.modelcontextprotocol/serverInfo"].version, "1.2.3");
+  assert.equal(response.result.serverInfo.name, "test-server");
+  assert.equal(response.result.serverInfo.version, "1.2.3");
   assert.equal(response.result.instructions, "Instructions for discovery test.");
 });
 
@@ -112,8 +112,12 @@ test("HTTP-SSE Gateway routes stateful requests stickily based on the extracted 
   assert.equal(response2.serverInstanceId, assignedWorker);
   assert.equal(response2.reusedExistingSession, true);
 
-  // Verify session registry has an entry for the browser handle
-  const record = await registry.get("browser-xyz");
+  // Verify workload registry has an entry for the browser handle
+  const record = await controller.workloadRegistry.get("browser-xyz");
   assert.ok(record);
   assert.equal(record.serverInstanceId, assignedWorker);
+
+  // Verify legacy session registry does not have an entry
+  const legacyRecord = await registry.get("browser-xyz");
+  assert.equal(legacyRecord, undefined);
 });

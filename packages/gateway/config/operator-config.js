@@ -15,6 +15,7 @@ export const DEFAULT_GATEWAY_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryRedisUrl: undefined,
   adaptivePlacementEnabled: false,
   adaptivePlacementClientAllowlist: [],
+  stateHandleKeys: ["browser_id", "sandbox_id", "shell_id", "transaction_id", "workspace_id", "model_handle", "agent_id"],
 });
 
 export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
@@ -34,6 +35,7 @@ export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryRedisUrl: undefined,
   adaptivePlacementEnabled: false,
   adaptivePlacementClientAllowlist: [],
+  stateHandleKeys: ["browser_id", "sandbox_id", "shell_id", "transaction_id", "workspace_id", "model_handle", "agent_id"],
 });
 
 const ALLOWED_ON_DISCONNECT_VALUES = new Set(["cancel", "queue"]);
@@ -68,6 +70,8 @@ export function resolveOperatorConfig({
       config.adaptivePlacementEnabled ?? defaults.adaptivePlacementEnabled,
     adaptivePlacementClientAllowlist:
       config.adaptivePlacementClientAllowlist ?? defaults.adaptivePlacementClientAllowlist,
+    stateHandleKeys:
+      config.stateHandleKeys ?? defaults.stateHandleKeys,
   };
 
   validateOperatorConfig(resolved);
@@ -75,6 +79,9 @@ export function resolveOperatorConfig({
     ...resolved,
     adaptivePlacementClientAllowlist: Object.freeze([
       ...resolved.adaptivePlacementClientAllowlist,
+    ]),
+    stateHandleKeys: Object.freeze([
+      ...resolved.stateHandleKeys,
     ]),
   });
 }
@@ -133,6 +140,9 @@ export function operatorConfigFromEnv({
         env.MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST ??
           env.MCP_OPERATOR_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST,
       ),
+      stateHandleKeys: env.MCP_GATEWAY_STATE_HANDLE_KEYS ?? env.MCP_OPERATOR_STATE_HANDLE_KEYS
+        ? (env.MCP_GATEWAY_STATE_HANDLE_KEYS ?? env.MCP_OPERATOR_STATE_HANDLE_KEYS).split(",").map(k => k.trim())
+        : undefined,
     },
   });
 }
@@ -227,6 +237,16 @@ function validateOperatorConfig(config) {
   for (const clientId of config.adaptivePlacementClientAllowlist) {
     if (typeof clientId !== "string" || clientId.trim().length === 0) {
       throw new TypeError("adaptivePlacementClientAllowlist items must be non-empty strings");
+    }
+  }
+
+  if (!Array.isArray(config.stateHandleKeys)) {
+    throw new TypeError("stateHandleKeys must be an array");
+  }
+
+  for (const key of config.stateHandleKeys) {
+    if (typeof key !== "string" || key.trim().length === 0) {
+      throw new TypeError("stateHandleKeys items must be non-empty strings");
     }
   }
 }

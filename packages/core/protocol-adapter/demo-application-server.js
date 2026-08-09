@@ -76,6 +76,9 @@ export function createDemoApplicationServer({ serverInstanceId } = {}) {
   return {
     serverInstanceId: state.serverInstanceId,
     getSessionState: state.getSessionState,
+    listTools() {
+      return server.listTools();
+    },
     async handleMessage(message, context = {}) {
       return server.handleMessage(message, {
         ...context,

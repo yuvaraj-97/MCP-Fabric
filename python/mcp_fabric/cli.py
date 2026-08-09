@@ -143,11 +143,12 @@ def run_analysis(path: str = ".") -> int:
     findings = []
 
     patterns = {
-        "initialize_dep": (re.compile(r'\binitialize\b|\binitialized\b', re.IGNORECASE), "Deprecation Candidate: Legacy initialize/initialized handshakes are obsolete in MCP 2026-07-28."),
-        "session_id_dep": (re.compile(r'Mcp-Session-Id|\bsessionId\b', re.IGNORECASE), "Deprecation Candidate: Mcp-Session-Id is removed. Migrate to explicit state handles (e.g., browser_id, sandbox_id)."),
-        "session_browser": (re.compile(r'\bsession\.browser\b'), "Migration Suggestion: Migrate session.browser -> browser_id"),
-        "session_shell": (re.compile(r'\bsession\.shell\b'), "Migration Suggestion: Migrate session.shell -> shell_id"),
-        "session_transaction": (re.compile(r'\bsession\.transaction\b'), "Migration Suggestion: Migrate session.transaction -> transaction_id"),
+        "initialize_dep": (re.compile(r'\binitialize\b|\binitialized\b', re.IGNORECASE), "Legacy initialize/initialized handshakes are obsolete in MCP 2026-07-28."),
+        "session_id_dep": (re.compile(r'Mcp-Session-Id|\bsessionId\b', re.IGNORECASE), "Mcp-Session-Id / sessionId detected. Consider migrating to explicit state handles (e.g., browser_id, sandbox_id)."),
+        "session_browser": (re.compile(r'\bsession\.browser\b'), "session.browser usage should be migrated to browser_id workload handle"),
+        "session_shell": (re.compile(r'\bsession\.shell\b'), "session.shell usage should be migrated to shell_id workload handle"),
+        "session_transaction": (re.compile(r'\bsession\.transaction\b'), "session.transaction usage should be migrated to transaction_id workload handle"),
+        "modern_handles": (re.compile(r'\b(browser_id|sandbox_id|shell_id|transaction_id|workspace_id)\b'), "Stateless workload affinity handle detected")
     }
 
     file_count = 0
@@ -157,16 +158,29 @@ def run_analysis(path: str = ".") -> int:
             if file.endswith(extensions):
                 file_count += 1
                 filepath = os.path.join(root, file)
+                is_fabric_compat = any(dir_name in filepath for dir_name in ["packages/core", "packages/transports", "packages/gateway"])
                 try:
                     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                         for line_num, line in enumerate(f, 1):
                             for name, (pattern, msg) in patterns.items():
                                 if pattern.search(line):
+                                    if is_fabric_compat:
+                                        category = "legitimate legacy compatibility code inside MCP-Fabric"
+                                    elif name == "modern_handles":
+                                        category = "already-compatible modern usage"
+                                    elif name == "initialize_dep":
+                                        category = "legacy protocol dependency"
+                                    elif name in ["session_browser", "session_shell", "session_transaction"]:
+                                        category = "likely explicit workload handle candidate"
+                                    else:
+                                        category = "application state hidden in MCP session"
+
                                     findings.append({
                                         "file": filepath,
                                         "line": line_num,
                                         "content": line.strip(),
-                                        "message": msg
+                                        "message": msg,
+                                        "category": category
                                     })
                 except Exception:
                     pass
@@ -176,13 +190,24 @@ def run_analysis(path: str = ".") -> int:
         print("\n[SUCCESS] No deprecated MCP capabilities or legacy session assumptions found.")
         return 0
 
-    print(f"\nFound {len(findings)} migration/deprecation candidates:")
-    print("------------------------------------------------------------------------------")
-    for idx, f in enumerate(findings, 1):
-        print(f"[{idx}] File: {f['file']}:{f['line']}")
-        print(f"    Line: {f['content']}")
-        print(f"    Issue: {f['message']}")
-        print("------------------------------------------------------------------------------")
+    categories = [
+        "legitimate legacy compatibility code inside MCP-Fabric",
+        "legacy protocol dependency",
+        "application state hidden in MCP session",
+        "likely explicit workload handle candidate",
+        "already-compatible modern usage"
+    ]
+
+    for cat in categories:
+        cat_findings = [f for f in findings if f["category"] == cat]
+        if cat_findings:
+            print(f"\nCategory: {cat.upper()}")
+            print("------------------------------------------------------------------------------")
+            for idx, f in enumerate(cat_findings, 1):
+                print(f"  [{idx}] File: {f['file']}:{f['line']}")
+                print(f"      Line: {f['content']}")
+                print(f"      Details: {f['message']}")
+            print("------------------------------------------------------------------------------")
 
     print("\nRecommendation: Transition to stateless MCP 2026-07-28 with explicit state handles.")
     print("==============================================================================")

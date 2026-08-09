@@ -39,5 +39,6 @@ import "./failover/http-sse-shared-registry.test.js";
 import "./failover/redis-outage.test.js";
 import "./failover/http-sse-gateway.test.js";
 import "./transport-agnostic/mcp-2026-stateless.test.js";
+import "./transport-agnostic/streamable-http-modern.test.js";
 
 
