@@ -1,10 +1,6 @@
 # MCP-Fabric
 
-MCP-Fabric is a production-oriented runtime fabric for MCP-compatible
-deployments. It keeps MCP application logic transport-neutral while adding the
-infrastructure needed to run MCP servers behind HTTP/SSE gateways with session
-affinity, load-aware routing, recovery behavior, adaptive placement diagnostics,
-and operator observability.
+MCP-Fabric is a production-oriented runtime fabric for MCP-compatible deployments. It keeps MCP application logic transport-neutral while supporting modern stateless MCP (2026-07-28) with high-performance routing, a stateless fast path, and workload-aware sticky routing (for handles like `browser_id`, `sandbox_id`, etc.) independently of legacy connection-level sessions.
 
 The gateway runtime is implemented in Node.js. The primary user-facing install
 path is Python:
@@ -278,11 +274,12 @@ without digging through source code.
 
 ## What MCP-Fabric Provides
 
-- Transport-neutral MCP application core.
-- Official `@modelcontextprotocol/sdk` request handling for `initialize`,
-  `ping`, `tools/list`, and `tools/call`.
-- HTTP/SSE gateway with sticky session routing.
-- Load-aware assignment for new sessions.
+- Transport-neutral MCP application core supporting stateless MCP 2026-07-28 and discovery (`server/discover`).
+- Backward compatibility for legacy MCP 2025-11-25.
+- Stateless Fast Path routing bypass (almost zero gateway overhead).
+- Workload-Aware Sticky Routing using explicit state handles (e.g. `browser_id`, `sandbox_id`, `shell_id`, `transaction_id`, `workspace_id`).
+- HTTP/SSE gateway with workload affinity.
+- Load-aware assignment and placement.
 - Explicit runtime modes: `sticky` and `stateless`.
 - Session TTL and reconnect grace-window enforcement.
 - In-memory, file-backed, and Redis-backed session registries.
@@ -291,6 +288,7 @@ without digging through source code.
 - Operator JSON observability at `/observability`.
 - A standalone gateway entrypoint for process and container deployments.
 - Python package and CLI for local gateway lifecycle management.
+- CLI code-migration analyzer (`mcp-fabric analyze`).
 
 ## Capability Matrix
 
@@ -413,6 +411,7 @@ mcp-fabric validate
 mcp-fabric gateway start
 mcp-fabric dashboard
 mcp-fabric test
+mcp-fabric analyze
 mcp-fabric runtime list-scripts
 mcp-fabric runtime run validate:filesystem
 ```
