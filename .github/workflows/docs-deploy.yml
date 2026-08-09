@@ -35,8 +35,12 @@ jobs:
           # Include CNAME in build output for custom domain setup
           cp docs/CNAME docs/_build/html/CNAME || true
 
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
         with:
-          name: docs-build-output
-          path: docs/_build/html/
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: mcp-fabric-docs
+          directory: docs/_build/html
+          gitToPagesbranch: main
+
