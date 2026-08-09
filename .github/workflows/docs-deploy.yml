@@ -42,5 +42,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: mcp-fabric-docs
           directory: docs/_build/html
-          gitToPagesbranch: main
+          branch: main
+
 
