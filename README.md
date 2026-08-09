@@ -557,7 +557,7 @@ Follow-up tool calls include the assigned session:
 
 ## Production Deployment Notes
 
-MCP-Fabric is production-ready as a runtime fabric when deployed with the normal
+MCP-Fabric supports MCP 2026-07-28 stateless routing and workload-aware execution when deployed with the normal
 edge controls expected for an HTTP service:
 
 - Run behind TLS and authentication.

@@ -10,6 +10,28 @@ export function createDemoApplicationState({ serverInstanceId } = {}) {
       const record = sessions.get(sessionId);
       return record ? cloneRecord(record) : undefined;
     },
+    getWorkloadState(workloadId) {
+      const record = sessions.get(workloadId);
+      return record ? cloneRecord(record) : undefined;
+    },
+    ensureWorkload({ workloadId, workloadKind, metadata = {} } = {}) {
+      assertNonEmptyString(workloadId, "workloadId");
+      const now = new Date().toISOString();
+      const existing = sessions.get(workloadId);
+
+      const record = {
+        sessionId: workloadId,
+        clientId: metadata.clientId ?? existing?.clientId ?? "anonymous-client",
+        serverInstanceId: resolvedServerInstanceId,
+        initializedAt: existing?.initializedAt ?? now,
+        lastSeenAt: now,
+        requestCount: existing?.requestCount ?? 0,
+        workloadKind: workloadKind || "unknown",
+      };
+
+      sessions.set(workloadId, record);
+      return cloneRecord(record);
+    },
     initializeSession({ sessionId, clientId, publish = () => {} } = {}) {
       const resolvedSessionId = sessionId ?? randomUUID();
       const now = new Date().toISOString();

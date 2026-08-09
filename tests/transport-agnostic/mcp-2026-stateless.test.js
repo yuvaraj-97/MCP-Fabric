@@ -22,8 +22,8 @@ test("server/discover returns correct MCP 2026-07-28 discovery payload", async (
   assert.equal(response.id, "disc-1");
   assert.equal(response.result.resultType, "complete");
   assert.deepEqual(response.result.supportedVersions, ["2026-07-28", "2025-11-25"]);
-  assert.equal(response.result.serverInfo.name, "test-server");
-  assert.equal(response.result.serverInfo.version, "1.2.3");
+  assert.equal(response.result._meta["io.modelcontextprotocol/serverInfo"].name, "test-server");
+  assert.equal(response.result._meta["io.modelcontextprotocol/serverInfo"].version, "1.2.3");
   assert.equal(response.result.instructions, "Instructions for discovery test.");
 });
 
@@ -48,6 +48,7 @@ test("HTTP-SSE Gateway handleGatewayMessage handles stateless fast path without 
     },
   }, {
     "mcp-protocol-version": "2026-07-28",
+    "mcp-method": "server/discover",
   });
 
   assert.equal(response.serverInstanceId, "worker-1");
@@ -86,6 +87,8 @@ test("HTTP-SSE Gateway routes stateful requests stickily based on the extracted 
     },
   }, {
     "mcp-protocol-version": "2026-07-28",
+    "mcp-method": "tools/call",
+    "mcp-name": "echo",
   });
 
   const assignedWorker = response1.serverInstanceId;
@@ -107,6 +110,8 @@ test("HTTP-SSE Gateway routes stateful requests stickily based on the extracted 
     },
   }, {
     "mcp-protocol-version": "2026-07-28",
+    "mcp-method": "tools/call",
+    "mcp-name": "echo",
   });
 
   assert.equal(response2.serverInstanceId, assignedWorker);

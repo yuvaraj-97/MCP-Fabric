@@ -269,15 +269,24 @@ export function createHttpSseGatewayController({
       redisKey: resolvedOperatorConfig.sessionRegistryRedisKey,
       redisUrl: resolvedOperatorConfig.sessionRegistryRedisUrl,
     });
+  let resolvedWorkloadRegistryFilePath = resolvedOperatorConfig.workloadRegistryFilePath;
+  if (resolvedOperatorConfig.workloadRegistryBackend === "file" && !resolvedWorkloadRegistryFilePath) {
+    if (resolvedSessionRegistry && typeof resolvedSessionRegistry.filePath === "function") {
+      resolvedWorkloadRegistryFilePath = resolvedSessionRegistry.filePath().replace(".json", "-workloads.json");
+    } else {
+      resolvedWorkloadRegistryFilePath = "mcp-workloads.json";
+    }
+  }
+
   const resolvedWorkloadRegistry =
     workloadRegistry ??
     createWorkloadRegistry({
-      backend: resolvedOperatorConfig.sessionRegistryBackend,
-      filePath: resolvedOperatorConfig.sessionRegistryFilePath,
+      backend: resolvedOperatorConfig.workloadRegistryBackend,
+      filePath: resolvedWorkloadRegistryFilePath,
       now,
       redisClient,
-      redisKey: "mcp:gateway:workloads",
-      redisUrl: resolvedOperatorConfig.sessionRegistryRedisUrl,
+      redisKey: resolvedOperatorConfig.workloadRegistryRedisKey,
+      redisUrl: resolvedOperatorConfig.workloadRegistryRedisUrl,
     });
   const router = new LoadRouter({
     sessionRegistry: resolvedSessionRegistry,
@@ -454,10 +463,20 @@ export function createHttpSseGatewayController({
     async handleGatewayMessage(body, headers = {}) {
       const method = body.method;
 
-      // Extract case-insensitive protocol version headers
-      const protocolVersionHeader = headers["mcp-protocol-version"] || headers["Mcp-Protocol-Version"] || headers["MCP-Protocol-Version"];
-      const mcpMethodHeader = headers["mcp-method"] || headers["Mcp-Method"] || headers["MCP-Method"];
-      const mcpNameHeader = headers["mcp-name"] || headers["Mcp-Name"] || headers["MCP-Name"];
+      // Case-insensitive header lookup helper
+      const getHeader = (name) => {
+        const lower = name.toLowerCase();
+        for (const [k, v] of Object.entries(headers)) {
+          if (k.toLowerCase() === lower) {
+            return v;
+          }
+        }
+        return undefined;
+      };
+
+      const protocolVersionHeader = getHeader("mcp-protocol-version");
+      const mcpMethodHeader = getHeader("mcp-method");
+      const mcpNameHeader = getHeader("mcp-name");
 
       const isModern =
         protocolVersionHeader === "2026-07-28" ||
@@ -466,19 +485,43 @@ export function createHttpSseGatewayController({
 
       // Validate headers for modern requests
       if (isModern) {
-        if (mcpMethodHeader && mcpMethodHeader !== method) {
+        if (!mcpMethodHeader) {
+          const error = new Error("Missing required Mcp-Method header for modern MCP request.");
+          error.statusCode = 400;
+          error.code = "mcp-method-missing";
+          throw error;
+        }
+        if (mcpMethodHeader !== method) {
           const error = new Error(`Mcp-Method header mismatch: expected '${method}', got '${mcpMethodHeader}'`);
           error.statusCode = 400;
           error.code = "mcp-method-mismatch";
           throw error;
         }
-        if (mcpNameHeader) {
-          let bodyName;
-          if (method === "tools/call" || method === "prompts/get") {
-            bodyName = body.params?.name;
+
+        if (method === "tools/call" || method === "prompts/get") {
+          const expectedName = body.params?.name;
+          if (!mcpNameHeader) {
+            const error = new Error(`Missing required Mcp-Name header for ${method}`);
+            error.statusCode = 400;
+            error.code = "mcp-name-missing";
+            throw error;
           }
-          if (bodyName && mcpNameHeader !== bodyName) {
-            const error = new Error(`Mcp-Name header mismatch: expected '${bodyName}', got '${mcpNameHeader}'`);
+          if (mcpNameHeader !== expectedName) {
+            const error = new Error(`Mcp-Name header mismatch for ${method}: expected '${expectedName}', got '${mcpNameHeader}'`);
+            error.statusCode = 400;
+            error.code = "mcp-name-mismatch";
+            throw error;
+          }
+        } else if (method === "resources/read") {
+          const expectedUri = body.params?.uri;
+          if (!mcpNameHeader) {
+            const error = new Error(`Missing required Mcp-Name header for ${method}`);
+            error.statusCode = 400;
+            error.code = "mcp-name-missing";
+            throw error;
+          }
+          if (mcpNameHeader !== expectedUri) {
+            const error = new Error(`Mcp-Name header mismatch for ${method}: expected '${expectedUri}', got '${mcpNameHeader}'`);
             error.statusCode = 400;
             error.code = "mcp-name-mismatch";
             throw error;
@@ -486,17 +529,12 @@ export function createHttpSseGatewayController({
         }
       }
 
-      // Extract W3C Trace Context
-      const traceContext = {};
-      if (headers["traceparent"] || headers["Traceparent"]) {
-        traceContext.traceparent = headers["traceparent"] || headers["Traceparent"];
-      }
-      if (headers["tracestate"] || headers["Tracestate"]) {
-        traceContext.tracestate = headers["tracestate"] || headers["Tracestate"];
-      }
-      if (headers["baggage"] || headers["Baggage"]) {
-        traceContext.baggage = headers["baggage"] || headers["Baggage"];
-      }
+      // Extract W3C Trace Context with precedence: _meta in body, then HTTP headers
+      const traceContext = {
+        traceparent: body.params?._meta?.traceparent ?? getHeader("traceparent"),
+        tracestate: body.params?._meta?.tracestate ?? getHeader("tracestate"),
+        baggage: body.params?._meta?.baggage ?? getHeader("baggage"),
+      };
 
       // Resolve Workload Affinity
       const findToolSchema = (toolName) => {
@@ -583,59 +621,82 @@ export function createHttpSseGatewayController({
             traceContext,
           });
 
-          const application = applications.get(serverInstanceId);
-          if (method !== "initialize" && !application.getSessionState(workloadAffinity.id)) {
-            const rehydrated = await application.handleMessage(
-              {
-                jsonrpc: "2.0",
-                id: `${workloadAffinity.id}:rehydrate`,
-                method: "initialize",
-                params: {
-                  clientId: "gateway-rehydrated-client",
-                },
-                sessionId: workloadAffinity.id,
-              },
-              {
-                sessionId: workloadAffinity.id,
-                transport: "streamable-http",
-                metadata: {
-                  workloadId: workloadAffinity.id,
-                  workloadKind: workloadAffinity.kind,
-                  traceContext,
-                },
-              }
-            );
-            assertGatewayResult(rehydrated);
-            observer.record("workload.rehydrated", {
+          if (placementCreated) {
+            observer.record("workload.placement.created", {
               workloadId: workloadAffinity.id,
+              workloadKind: workloadAffinity.kind,
               serverInstanceId,
               routingReason,
+              traceContext,
+            });
+          } else if (placementReassigned) {
+            observer.record("workload.placement.reassigned", {
+              workloadId: workloadAffinity.id,
+              workloadKind: workloadAffinity.kind,
+              serverInstanceId,
+              routingReason,
+              traceContext,
+            });
+          } else {
+            observer.record("workload.placement.reused", {
+              workloadId: workloadAffinity.id,
+              workloadKind: workloadAffinity.kind,
+              serverInstanceId,
+              routingReason,
+              traceContext,
             });
           }
 
-          const envelope = await application.handleMessage(
-            {
-              jsonrpc: "2.0",
-              id: body.id ?? `workload:${method}`,
-              method,
-              params: body.params,
-            },
-            {
-              sessionId: workloadAffinity.id,
-              transport: "streamable-http",
+          const application = applications.get(serverInstanceId);
+          if (typeof application.ensureWorkload === "function") {
+            await application.ensureWorkload({
+              workloadId: workloadAffinity.id,
+              workloadKind: workloadAffinity.kind,
               metadata: {
-                workloadId: workloadAffinity.id,
-                workloadKind: workloadAffinity.kind,
-                traceContext,
+                clientId: "gateway-rehydrated-client",
               },
-            }
-          );
+            });
+          }
+
+          const envelope = typeof application.handleWorkloadMessage === "function"
+            ? await application.handleWorkloadMessage(
+                {
+                  jsonrpc: "2.0",
+                  id: body.id ?? `workload:${method}`,
+                  method,
+                  params: body.params,
+                },
+                {
+                  workloadId: workloadAffinity.id,
+                  workloadKind: workloadAffinity.kind,
+                  traceContext,
+                }
+              )
+            : await application.handleMessage(
+                {
+                  jsonrpc: "2.0",
+                  id: body.id ?? `workload:${method}`,
+                  method,
+                  params: body.params,
+                },
+                {
+                  sessionId: workloadAffinity.id,
+                  transport: "streamable-http",
+                  metadata: {
+                    workloadId: workloadAffinity.id,
+                    workloadKind: workloadAffinity.kind,
+                    traceContext,
+                  },
+                }
+              );
 
           const result = assertGatewayResult(envelope);
           return {
             serverInstanceId,
             runtimeMode: "sticky",
-            reusedExistingSession: !placementCreated,
+            reusedExistingWorkload: !placementCreated,
+            workloadPlacementReused: !placementCreated,
+            reusedExistingSession: !placementCreated, // deprecated legacy alias
             result,
           };
         } else {
@@ -1730,4 +1791,16 @@ function renderInspectorHtml() {
     </script>
   </body>
 </html>`;
+}
+
+/**
+ * Modern Streamable HTTP aliases for createHttpSseGatewayServer and createHttpSseGatewayController.
+ * The legacy names are preserved as deprecated aliases.
+ */
+export function createStreamableHttpGatewayServer(options) {
+  return createHttpSseGatewayServer(options);
+}
+
+export function createStreamableHttpGatewayController(options) {
+  return createHttpSseGatewayController(options);
 }

@@ -76,6 +76,23 @@ export function createDemoApplicationServer({ serverInstanceId } = {}) {
   return {
     serverInstanceId: state.serverInstanceId,
     getSessionState: state.getSessionState,
+    getWorkloadState(workloadId) {
+      return state.getWorkloadState(workloadId);
+    },
+    async ensureWorkload({ workloadId, workloadKind, metadata }) {
+      return state.ensureWorkload({ workloadId, workloadKind, metadata });
+    },
+    async handleWorkloadMessage(message, { workloadId, workloadKind, traceContext } = {}) {
+      return server.handleMessage(message, {
+        sessionId: workloadId,
+        transport: "streamable-http",
+        metadata: {
+          workloadId,
+          workloadKind,
+          traceContext,
+        },
+      });
+    },
     listTools() {
       return server.listTools();
     },

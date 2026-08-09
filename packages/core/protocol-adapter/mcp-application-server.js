@@ -255,9 +255,11 @@ export class McpApplicationServer {
             listChanged: false,
           },
         },
-        serverInfo: {
-          name: this.#serverInfo.name,
-          version: this.#serverInfo.version,
+        _meta: {
+          "io.modelcontextprotocol/serverInfo": {
+            name: this.#serverInfo.name,
+            version: this.#serverInfo.version,
+          },
         },
         instructions: this.#instructions,
         ttlMs: 3600000,

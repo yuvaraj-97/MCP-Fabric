@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
+import { existsSync, promises as fs, readFileSync } from "node:fs";
 import { createIoredisClient } from "../session-registry/ioredis-client.js";
 
 export function createWorkloadRegistry({
@@ -10,8 +12,15 @@ export function createWorkloadRegistry({
   redisUrl,
   redisClientFactory = createIoredisClient,
 } = {}) {
-  if (backend === "memory" || backend === "file") {
+  if (backend === "memory") {
     return new MemoryWorkloadRegistry({ now });
+  }
+
+  if (backend === "file") {
+    if (!filePath) {
+      throw new TypeError("filePath is required for file-backed WorkloadRegistry");
+    }
+    return new FileWorkloadRegistry({ filePath, now });
   }
 
   if (backend === "redis") {
@@ -429,5 +438,203 @@ function cloneRecord(record) {
 function assertNonEmptyString(value, name) {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${name} must be a non-empty string`);
+  }
+}
+
+class FileWorkloadRegistry {
+  #filePath;
+  #now;
+  #workloads = new Map();
+  #writePromise = Promise.resolve();
+  #writeScheduled = false;
+  #writeQueued = false;
+  #writeSequence = 0;
+  #persistError;
+
+  constructor({ filePath, now = () => Date.now() } = {}) {
+    assertNonEmptyString(filePath, "filePath");
+    this.#filePath = filePath;
+    this.#now = now;
+    this.#loadFromDisk();
+  }
+
+  storageKind() {
+    return "file";
+  }
+
+  isDurable() {
+    return true;
+  }
+
+  filePath() {
+    return this.#filePath;
+  }
+
+  async create(id, { kind, serverInstanceId, expiresAt, recoveryPolicy = "default", metadata = {} }) {
+    assertNonEmptyString(id, "id");
+    assertNonEmptyString(serverInstanceId, "serverInstanceId");
+
+    const timeNow = this.#now();
+    const record = {
+      id,
+      kind: kind || "unknown",
+      serverInstanceId,
+      createdAt: timeNow,
+      updatedAt: timeNow,
+      expiresAt: expiresAt || (timeNow + 3600000),
+      recoveryPolicy,
+      metadata: { ...metadata },
+    };
+
+    this.#workloads.set(id, record);
+    this.#persist();
+    return cloneRecord(record);
+  }
+
+  async get(id) {
+    assertNonEmptyString(id, "id");
+    this.pruneExpired();
+    const record = this.#workloads.get(id);
+    return record ? cloneRecord(record) : undefined;
+  }
+
+  async update(id, updates = {}) {
+    assertNonEmptyString(id, "id");
+    this.pruneExpired();
+    const existing = this.#workloads.get(id);
+    if (!existing) {
+      throw new Error(`Workload not found: ${id}`);
+    }
+
+    const timeNow = this.#now();
+    const record = {
+      ...existing,
+      ...updates,
+      metadata: { ...existing.metadata, ...updates.metadata },
+      updatedAt: timeNow,
+    };
+
+    this.#workloads.set(id, record);
+    this.#persist();
+    return cloneRecord(record);
+  }
+
+  async delete(id) {
+    assertNonEmptyString(id, "id");
+    const deleted = this.#workloads.delete(id);
+    if (deleted) {
+      this.#persist();
+    }
+    return deleted;
+  }
+
+  async reassign(id, serverInstanceId) {
+    assertNonEmptyString(id, "id");
+    assertNonEmptyString(serverInstanceId, "serverInstanceId");
+    return this.update(id, { serverInstanceId });
+  }
+
+  async touch(id, expiresAt) {
+    assertNonEmptyString(id, "id");
+    return this.update(id, { expiresAt });
+  }
+
+  async list() {
+    this.pruneExpired();
+    return Array.from(this.#workloads.values(), cloneRecord);
+  }
+
+  pruneExpired() {
+    const timeNow = this.#now();
+    for (const [id, record] of this.#workloads.entries()) {
+      if (record.expiresAt <= timeNow) {
+        this.#workloads.delete(id);
+      }
+    }
+    this.#persist();
+  }
+
+  async prune() {
+    this.pruneExpired();
+  }
+
+  async close() {
+    await this.flush();
+  }
+
+  async flush() {
+    await this.#writePromise;
+    if (this.#persistError) {
+      throw this.#persistError;
+    }
+  }
+
+  #loadFromDisk() {
+    if (!existsSync(this.#filePath)) {
+      return;
+    }
+
+    const raw = readFileSync(this.#filePath, "utf8");
+    if (!raw.trim()) {
+      return;
+    }
+
+    try {
+      const state = JSON.parse(raw);
+      for (const record of state.workloads ?? []) {
+        if (record?.id && record?.serverInstanceId) {
+          this.#workloads.set(record.id, record);
+        }
+      }
+      this.pruneExpired();
+    } catch {}
+  }
+
+  #persist() {
+    if (this.#writeScheduled) {
+      this.#writeQueued = true;
+      return;
+    }
+
+    this.#writeScheduled = true;
+    this.#writePromise = this.#writePromise
+      .catch(() => undefined)
+      .then(() => this.#drainPersistQueue());
+    this.#writePromise.catch(() => undefined);
+  }
+
+  #snapshot() {
+    return {
+      version: 1,
+      workloads: Array.from(this.#workloads.values(), cloneRecord),
+    };
+  }
+
+  async #drainPersistQueue() {
+    try {
+      do {
+        this.#writeQueued = false;
+        await this.#writeState(this.#snapshot());
+      } while (this.#writeQueued);
+    } finally {
+      this.#writeScheduled = false;
+    }
+  }
+
+  async #writeState(state) {
+    const tmpPath = `${this.#filePath}.${process.pid}.${++this.#writeSequence}.tmp`;
+    const payload = JSON.stringify(state, null, 2);
+
+    try {
+      await fs.mkdir(dirname(this.#filePath), { recursive: true });
+      await fs.writeFile(tmpPath, payload, "utf8");
+      await fs.rename(tmpPath, this.#filePath);
+      this.#persistError = undefined;
+    } catch (error) {
+      this.#persistError = error;
+      throw error;
+    } finally {
+      await fs.rm(tmpPath, { force: true }).catch(() => undefined);
+    }
   }
 }

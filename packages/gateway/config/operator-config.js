@@ -13,6 +13,10 @@ export const DEFAULT_GATEWAY_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryFilePath: undefined,
   sessionRegistryRedisKey: "mcp:gateway:sessions",
   sessionRegistryRedisUrl: undefined,
+  workloadRegistryBackend: "memory",
+  workloadRegistryFilePath: undefined,
+  workloadRegistryRedisKey: "mcp:gateway:workloads",
+  workloadRegistryRedisUrl: undefined,
   adaptivePlacementEnabled: false,
   adaptivePlacementClientAllowlist: [],
   stateHandleKeys: ["browser_id", "sandbox_id", "shell_id", "transaction_id", "workspace_id", "model_handle", "agent_id"],
@@ -33,6 +37,10 @@ export const DEFAULT_DASHBOARD_OPERATOR_CONFIG = Object.freeze({
   sessionRegistryFilePath: undefined,
   sessionRegistryRedisKey: "mcp:gateway:sessions",
   sessionRegistryRedisUrl: undefined,
+  workloadRegistryBackend: "file",
+  workloadRegistryFilePath: undefined,
+  workloadRegistryRedisKey: "mcp:gateway:workloads",
+  workloadRegistryRedisUrl: undefined,
   adaptivePlacementEnabled: false,
   adaptivePlacementClientAllowlist: [],
   stateHandleKeys: ["browser_id", "sandbox_id", "shell_id", "transaction_id", "workspace_id", "model_handle", "agent_id"],
@@ -66,6 +74,14 @@ export function resolveOperatorConfig({
       config.sessionRegistryRedisKey ?? defaults.sessionRegistryRedisKey,
     sessionRegistryRedisUrl:
       config.sessionRegistryRedisUrl ?? defaults.sessionRegistryRedisUrl,
+    workloadRegistryBackend:
+      config.workloadRegistryBackend ?? defaults.workloadRegistryBackend ?? (config.sessionRegistryBackend ?? defaults.sessionRegistryBackend ?? "memory"),
+    workloadRegistryFilePath:
+      config.workloadRegistryFilePath ?? defaults.workloadRegistryFilePath ?? (config.sessionRegistryFilePath ?? defaults.sessionRegistryFilePath),
+    workloadRegistryRedisKey:
+      config.workloadRegistryRedisKey ?? defaults.workloadRegistryRedisKey ?? "mcp:gateway:workloads",
+    workloadRegistryRedisUrl:
+      config.workloadRegistryRedisUrl ?? defaults.workloadRegistryRedisUrl ?? (config.sessionRegistryRedisUrl ?? defaults.sessionRegistryRedisUrl),
     adaptivePlacementEnabled:
       config.adaptivePlacementEnabled ?? defaults.adaptivePlacementEnabled,
     adaptivePlacementClientAllowlist:
@@ -131,6 +147,19 @@ export function operatorConfigFromEnv({
       sessionRegistryRedisUrl:
         env.MCP_GATEWAY_SESSION_REGISTRY_REDIS_URL ??
         env.MCP_OPERATOR_SESSION_REGISTRY_REDIS_URL ??
+        env.REDIS_URL,
+      workloadRegistryBackend:
+        env.MCP_GATEWAY_WORKLOAD_REGISTRY_BACKEND ??
+        env.MCP_OPERATOR_WORKLOAD_REGISTRY_BACKEND,
+      workloadRegistryFilePath:
+        env.MCP_GATEWAY_WORKLOAD_REGISTRY_FILE ??
+        env.MCP_OPERATOR_WORKLOAD_REGISTRY_FILE,
+      workloadRegistryRedisKey:
+        env.MCP_GATEWAY_WORKLOAD_REGISTRY_REDIS_KEY ??
+        env.MCP_OPERATOR_WORKLOAD_REGISTRY_REDIS_KEY,
+      workloadRegistryRedisUrl:
+        env.MCP_GATEWAY_WORKLOAD_REGISTRY_REDIS_URL ??
+        env.MCP_OPERATOR_WORKLOAD_REGISTRY_REDIS_URL ??
         env.REDIS_URL,
       adaptivePlacementEnabled: parseOptionalBoolean(
         env.MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED ??
@@ -238,6 +267,28 @@ function validateOperatorConfig(config) {
     if (typeof clientId !== "string" || clientId.trim().length === 0) {
       throw new TypeError("adaptivePlacementClientAllowlist items must be non-empty strings");
     }
+  }
+
+  if (!ALLOWED_SESSION_REGISTRY_BACKENDS.has(config.workloadRegistryBackend)) {
+    throw new RangeError('workloadRegistryBackend must be one of: "memory", "file", "redis"');
+  }
+
+  if (
+    config.workloadRegistryFilePath !== undefined &&
+    (typeof config.workloadRegistryFilePath !== "string" ||
+      config.workloadRegistryFilePath.trim().length === 0)
+  ) {
+    throw new TypeError("workloadRegistryFilePath must be a non-empty string when provided");
+  }
+
+  assertNonEmptyString(config.workloadRegistryRedisKey, "workloadRegistryRedisKey");
+
+  if (
+    config.workloadRegistryRedisUrl !== undefined &&
+    (typeof config.workloadRegistryRedisUrl !== "string" ||
+      config.workloadRegistryRedisUrl.trim().length === 0)
+  ) {
+    throw new TypeError("workloadRegistryRedisUrl must be a non-empty string when provided");
   }
 
   if (!Array.isArray(config.stateHandleKeys)) {
