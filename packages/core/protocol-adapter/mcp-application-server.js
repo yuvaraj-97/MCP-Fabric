@@ -23,7 +23,7 @@ export class McpApplicationServer {
   #protocolVersion;
   #instructions;
   #tools = new Map();
-  #sdkMethods = new Set(["initialize", "ping", "tools/list", "tools/call"]);
+  #sdkMethods = new Set(["initialize", "ping", "tools/list", "tools/call", "server/discover"]);
   #notificationLog = [];
   #maxNotificationLogEntries;
   #notificationListeners = new Set();
@@ -243,6 +243,27 @@ export class McpApplicationServer {
           clientId: context?.clientId,
           transport: context?.transport,
         },
+      };
+    });
+
+    this.#sdkServer.setRequestHandler(createCustomRequestSchema("server/discover"), () => {
+      return {
+        resultType: "complete",
+        supportedVersions: ["2026-07-28", "2025-11-25"],
+        capabilities: {
+          tools: {
+            listChanged: false,
+          },
+        },
+        _meta: {
+          "io.modelcontextprotocol/serverInfo": {
+            name: this.#serverInfo.name,
+            version: this.#serverInfo.version,
+          },
+        },
+        instructions: this.#instructions,
+        ttlMs: 3600000,
+        cacheScope: "public",
       };
     });
 

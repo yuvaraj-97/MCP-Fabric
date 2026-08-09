@@ -153,6 +153,11 @@ function readFrameFromBuffer(buffer) {
 }
 
 function sessionIdFromMessage(message) {
+  const stateHandle = extractStateHandle(message);
+  if (stateHandle) {
+    return stateHandle;
+  }
+
   const incomingSessionId = message?.params?.sessionId;
   if (typeof incomingSessionId === "string" && incomingSessionId.trim().length > 0) {
     return incomingSessionId.trim();
@@ -167,4 +172,18 @@ function sessionIdFromMessage(message) {
   }
 
   return "stdio-session";
+}
+
+function extractStateHandle(body) {
+  if (!body || typeof body !== "object") return null;
+  if (!body.params || typeof body.params !== "object") return null;
+  const args = body.method === "tools/call" ? body.params.arguments : body.params;
+  if (!args || typeof args !== "object") return null;
+  const keys = ["browser_id", "sandbox_id", "shell_id", "transaction_id", "workspace_id", "model_handle", "agent_id"];
+  for (const key of keys) {
+    if (typeof args[key] === "string" && args[key].trim().length > 0) {
+      return args[key].trim();
+    }
+  }
+  return null;
 }

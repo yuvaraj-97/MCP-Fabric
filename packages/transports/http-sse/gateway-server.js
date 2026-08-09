@@ -194,7 +194,7 @@ export function createGatewayHttpHandler({
 
       if (request.method === "POST" && url.pathname === "/message") {
         const body = await readJsonBody(request);
-        const result = await controller.handleGatewayMessage(body);
+        const result = await controller.handleGatewayMessage(body, request.headers);
         return sendJson(response, 200, result);
       }
 
@@ -437,9 +437,72 @@ export function createHttpSseGatewayController({
         remainingAttachments: eventStreams.get(sessionId)?.size ?? 0,
       });
     },
-    async handleGatewayMessage(body) {
+    async handleGatewayMessage(body, headers = {}) {
       const method = body.method;
-      const sessionId = body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
+      const isModern =
+        headers["mcp-protocol-version"] === "2026-07-28" ||
+        headers["Mcp-Protocol-Version"] === "2026-07-28" ||
+        body.params?._meta?.["io.modelcontextprotocol/protocolVersion"] === "2026-07-28" ||
+        method === "server/discover";
+
+      const extractStateHandle = (msg) => {
+        if (!msg || typeof msg !== "object") return null;
+        if (!msg.params || typeof msg.params !== "object") return null;
+        const args = msg.method === "tools/call" ? msg.params.arguments : msg.params;
+        if (!args || typeof args !== "object") return null;
+        const keys = ["browser_id", "sandbox_id", "shell_id", "transaction_id", "workspace_id", "model_handle", "agent_id"];
+        for (const key of keys) {
+          if (typeof args[key] === "string" && args[key].trim().length > 0) {
+            return args[key].trim();
+          }
+        }
+        return null;
+      };
+
+      const stateHandle = extractStateHandle(body);
+
+      if (isModern && !stateHandle) {
+        const instances = router.listInstances().filter((i) => i.healthy && i.acceptingNewSessions);
+        if (instances.length === 0) {
+          const error = new Error("No healthy server instance is accepting new sessions");
+          error.statusCode = 503;
+          error.code = "no-healthy-instances";
+          throw error;
+        }
+        instances.sort((a, b) => a.load - b.load);
+        const selectedInstance = instances[0];
+        const application = applications.get(selectedInstance.serverInstanceId);
+
+        observer.record("stateless.route.selected", {
+          method,
+          serverInstanceId: selectedInstance.serverInstanceId,
+        });
+
+        const envelope = await application.handleMessage(
+          {
+            jsonrpc: "2.0",
+            id: body.id ?? `stateless:${method}`,
+            method,
+            params: body.params,
+          },
+          {
+            transport: "http-sse",
+            metadata: {},
+          }
+        );
+        const result = assertGatewayResult(envelope);
+        return {
+          serverInstanceId: selectedInstance.serverInstanceId,
+          runtimeMode: "stateless",
+          result,
+        };
+      }
+
+      const sessionId = stateHandle ?? body.sessionId ?? (method === "initialize" ? randomUUID() : undefined);
+      if (stateHandle) {
+        body.sessionId = stateHandle;
+      }
+
       let placement;
       let runtimeRecommendation;
       let existingSessionRecord;
@@ -502,7 +565,7 @@ export function createHttpSseGatewayController({
           runtimeMode,
           runtimeRecommendation,
         });
-        if (method !== "initialize" && !existingSessionRecord) {
+        if (!isModern && method !== "initialize" && !existingSessionRecord) {
           observer.record("request.rejected", {
             method,
             sessionId,
@@ -517,7 +580,7 @@ export function createHttpSseGatewayController({
         }
 
         const reconnectState = deriveReconnectState(existingSessionRecord, requestNow);
-        if (method !== "initialize" && reconnectState === "grace-expired") {
+        if (!isModern && method !== "initialize" && reconnectState === "grace-expired") {
           await resolvedSessionRegistry.delete(sessionId);
           queuedDisconnectEvents.delete(sessionId);
           observer.record("request.rejected", {

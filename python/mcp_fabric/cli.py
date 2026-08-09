@@ -40,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("test")
     subparsers.add_parser("validate")
     subparsers.add_parser("version")
+    analyze = subparsers.add_parser("analyze")
+    analyze.add_argument("path", nargs="?", default=".")
 
     args = parser.parse_args(argv)
 
@@ -80,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "test":
         return run_runtime_npm_script("test")
+
+    if args.command == "analyze":
+        return run_analysis(args.path)
 
     parser.error("unsupported command")
     return 2
@@ -123,6 +128,65 @@ def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
             raise SystemExit("--env key must not be empty")
         parsed[key] = value
     return parsed
+
+
+def run_analysis(path: str = ".") -> int:
+    import os
+    import re
+
+    print("==============================================================================")
+    print("                         MCP-FABRIC MIGRATION ANALYZER                        ")
+    print("==============================================================================")
+    print(f"Scanning directory: {os.path.abspath(path)}")
+
+    extensions = (".py", ".js", ".ts", ".json")
+    findings = []
+
+    patterns = {
+        "initialize_dep": (re.compile(r'\binitialize\b|\binitialized\b', re.IGNORECASE), "Deprecation Candidate: Legacy initialize/initialized handshakes are obsolete in MCP 2026-07-28."),
+        "session_id_dep": (re.compile(r'Mcp-Session-Id|\bsessionId\b', re.IGNORECASE), "Deprecation Candidate: Mcp-Session-Id is removed. Migrate to explicit state handles (e.g., browser_id, sandbox_id)."),
+        "session_browser": (re.compile(r'\bsession\.browser\b'), "Migration Suggestion: Migrate session.browser -> browser_id"),
+        "session_shell": (re.compile(r'\bsession\.shell\b'), "Migration Suggestion: Migrate session.shell -> shell_id"),
+        "session_transaction": (re.compile(r'\bsession\.transaction\b'), "Migration Suggestion: Migrate session.transaction -> transaction_id"),
+    }
+
+    file_count = 0
+    for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".venv", "__pycache__", "build", "dist", ".pytest_cache")]
+        for file in files:
+            if file.endswith(extensions):
+                file_count += 1
+                filepath = os.path.join(root, file)
+                try:
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        for line_num, line in enumerate(f, 1):
+                            for name, (pattern, msg) in patterns.items():
+                                if pattern.search(line):
+                                    findings.append({
+                                        "file": filepath,
+                                        "line": line_num,
+                                        "content": line.strip(),
+                                        "message": msg
+                                    })
+                except Exception:
+                    pass
+
+    print(f"Scanned {file_count} files.")
+    if not findings:
+        print("\n[SUCCESS] No deprecated MCP capabilities or legacy session assumptions found.")
+        return 0
+
+    print(f"\nFound {len(findings)} migration/deprecation candidates:")
+    print("------------------------------------------------------------------------------")
+    for idx, f in enumerate(findings, 1):
+        print(f"[{idx}] File: {f['file']}:{f['line']}")
+        print(f"    Line: {f['content']}")
+        print(f"    Issue: {f['message']}")
+        print("------------------------------------------------------------------------------")
+
+    print("\nRecommendation: Transition to stateless MCP 2026-07-28 with explicit state handles.")
+    print("==============================================================================")
+    return 0
 
 
 if __name__ == "__main__":
