@@ -3,10 +3,10 @@ Python API Reference
 
 This page documents the Python API reference for ``mcp_fabric``.
 
-Fabric Engine
--------------
+Local Fabric Context
+--------------------
 
-.. automodule:: mcp_fabric.engine
+.. automodule:: mcp_fabric.local
    :members:
    :undoc-members:
    :show-inheritance:
@@ -19,10 +19,10 @@ Fabric Client
    :undoc-members:
    :show-inheritance:
 
-Routing & Pool Management
--------------------------
+Runtime Gateway Manager
+-----------------------
 
-.. automodule:: mcp_fabric.routing
+.. automodule:: mcp_fabric.runtime
    :members:
    :undoc-members:
    :show-inheritance:

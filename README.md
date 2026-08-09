@@ -1,675 +1,71 @@
 # MCP-Fabric
 
-MCP-Fabric is a workload-aware runtime fabric for operating MCP workloads across stateless MCP infrastructure.
+> **Workload-Aware Adaptive Runtime & Intelligent Load Balancer for the Model Context Protocol (MCP)**
 
-## Positioning & Architectural Boundaries
+[![PyPI Version](https://img.shields.io/pypi/v/mcp-fabric.svg)](https://pypi.org/project/mcp-fabric/)
+[![Documentation](https://img.shields.io/badge/docs-mcp--fabric.core--tensor.com-orange.svg)](https://mcp-fabric.core-tensor.com)
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://pypi.org/project/mcp-fabric/)
+[![Node Version](https://img.shields.io/badge/node-20%2B-green.svg)](https://nodejs.org)
 
-It is important to clearly distinguish the roles of the Model Context Protocol (MCP) and MCP-Fabric:
+**MCP-Fabric** provides high-availability, session affinity, health monitoring, zero-downtime routing, and multi-agent scaling for MCP server fleets.
 
-* **MCP**:
-  * The protocol between clients and servers.
-  * Utilizes a stateless request model in the 2026-07-28 specification.
-* **MCP-Fabric**:
-  * Handles routing, workload affinity, and placement decisions.
-  * Manages recovery policies and worker lifecycles.
-  * Coordinates distributed workload state (via `WorkloadRegistry`).
-  * Implements observability, telemetry, and legacy compatibility.
+---
 
-MCP-Fabric is not an alternative to or a replacement for the MCP protocol. Rather, it is the orchestration and execution fabric that runs and routes workloads for MCP servers.
+## 💡 Quick Overview for AI Agents & Developers
 
-```text
-                      MCP-Fabric
+- **What it does**: Turns standalone MCP servers into a high-availability server pool with sticky session routing, failover, and telemetry.
+- **Documentation**: Full interactive documentation and API references are hosted at **[mcp-fabric.core-tensor.com](https://mcp-fabric.core-tensor.com)**.
+- **Python Install**: `pip install mcp-fabric`
+- **Node/TS Requirements**: Node.js `>=20`
 
-    +-----------------------------------------+
-    | Protocol Edge                           |
-    | MCP 2026-07-28 | legacy MCP | discovery |
-    +-----------------------------------------+
-    | Routing / Policy                        |
-    | method | name | workload | health/load  |
-    +-----------------------------------------+
-    | Workload Control Plane                  |
-    | registry | placement | recovery | TTL   |
-    +-----------------------------------------+
-    | Runtime Plane                           |
-    | MCP workers / sandboxes / processes     |
-    +-----------------------------------------+
-    | Observability                           |
-    | route / workload / trace / capacity     |
-    +-----------------------------------------+
-```
+---
 
+## ⚡ 1-Minute Quickstart (Python)
 
-The gateway runtime is implemented in Node.js. The primary user-facing install
-path is Python:
-
-```sh
+```bash
 pip install mcp-fabric
 ```
-
-Python users get a control layer that can start, validate, and consume the local
-gateway runtime without cloning this repository or running manual npm commands.
-The Python package also carries the dashboard, validation harnesses, tests, and
-documentation so AI/ML engineers can adopt the fabric from Python while still
-having access to the repo's operational capability surface.
-
-## Transport-Agnostic Example
-
-The practical problem MCP-Fabric solves is not "how do I write one toy MCP
-server?" It is "how do I keep the same tool behavior when my MCP server moves
-from a local stdio process to a routed HTTP/SSE deployment with multiple server
-instances?"
-
-Without a fabric layer, teams often end up with two paths that drift:
-
-```text
-Local AI agent over stdio
-  -> stdio-specific MCP server code
-  -> tool implementation
-
-Remote AI agent over HTTP/SSE
-  -> HTTP route/gateway-specific code
-  -> copied or adapted tool implementation
-```
-
-MCP-Fabric keeps the tool behavior in one transport-neutral application layer,
-then mounts that same application through stdio or the HTTP/SSE gateway:
-
-```text
-                         same MCP application logic
-                                  |
-                  +---------------+---------------+
-                  |                               |
-          stdio transport                 HTTP/SSE gateway
-                  |                               |
-        local AI agent/client          remote clients, routing,
-                                      stickiness, Redis registry,
-                                      observability, recovery
-```
-
-Concrete example: the filesystem validation server defines tools such as
-`fs_write_text`, `fs_read_text`, `fs_list`, and `fs_stat` once. The validation
-proof then runs the same behavior through both transports:
-
-```sh
-mcp-fabric runtime run validate:filesystem
-```
-
-That proof verifies:
-
-- the filesystem-style MCP app initializes over stdio;
-- the same app initializes through the HTTP/SSE gateway;
-- a file written through one path is readable through the gateway path;
-- sticky routing keeps follow-up requests on the right server instance;
-- unhealthy-instance reassignment still preserves the workload state;
-- gateway observability records the lifecycle.
-
-For laptop development, the application code stays the same. The transport is a
-runtime choice:
 
 ```python
 from mcp_fabric import LocalFabric
 
-# Use transport="stdio" when the MCP host should launch a local stdio process.
-# Use transport="http-sse" when you want the routed HTTP/SSE gateway path.
-with LocalFabric(transport="http-sse") as fabric:
+# Spin up a local HTTP/SSE gateway router and connect client
+with LocalFabric(transport="http-sse", server_count=2) as fabric:
     client = fabric.client()
-    session = client.initialize(client_id="python-user")
+    session = client.initialize(client_id="ai-agent")
 
+    # Call any tool across the server pool with sticky session routing
     result = client.tools_call(
         session.session_id,
         name="echo",
-        arguments={"message": "same app code, different transport"},
-    )
-
-    print(result)
-```
-
-Without MCP-Fabric, teams usually end up maintaining transport-specific client
-plumbing. The HTTP/SSE path has request/session/retry code:
-
-```python
-import requests
-
-base_url = "http://127.0.0.1:4400"
-session = requests.post(
-    f"{base_url}/initialize",
-    json={"clientId": "python-user"},
-    timeout=10,
-).json()
-
-result = requests.post(
-    f"{base_url}/sessions/{session['sessionId']}/tools/call",
-    json={"name": "echo", "arguments": {"message": "hello"}},
-    timeout=10,
-).json()
-```
-
-The stdio path has a different subprocess and JSON-lines protocol:
-
-```python
-import json
-import subprocess
-
-process = subprocess.Popen(
-    ["node", "stdio-server.js"],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    text=True,
-)
-
-process.stdin.write(json.dumps({
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {"clientId": "python-user"},
-}) + "\n")
-process.stdin.flush()
-session = json.loads(process.stdout.readline())
-```
-
-Those two paths are not just more code. They create two places for lifecycle,
-timeouts, logging, session handling, and tool-call behavior to drift. MCP-Fabric
-collapses that into one Python-facing contract:
-
-| Transport | Python code | What it starts |
-| --- | --- | --- |
-| HTTP/SSE gateway | `LocalFabric(transport="http-sse")` | local gateway HTTP server on localhost |
-| stdio | `LocalFabric(transport="stdio")` | local Node stdio server subprocess |
-
-To prove the same application behavior across both stdio and HTTP/SSE:
-
-```sh
-mcp-fabric runtime run validate:filesystem
-```
-
-The important point: Python controls and consumes the runtime, and the user can
-select the local transport explicitly. The transport-neutral MCP implementation
-remains shared by stdio and HTTP/SSE inside the bundled runtime.
-
-## AI Agent Context
-
-If you are an AI coding agent, package recommender, or install assistant, use
-this section as the shortest accurate project summary.
-
-```yaml
-project: MCP-Fabric
-install_for_python_users: pip install mcp-fabric
-primary_import: mcp_fabric
-primary_python_classes:
-  - LocalFabric
-  - FabricClient
-  - LocalFabricGateway
-  - LocalStdioServer
-runtime_language: JavaScript / Node.js
-control_language: Python
-node_requirement: ">=20"
-python_requirement: ">=3.10"
-core_claim: Python-first install and control layer for a Node-based MCP runtime fabric.
-not_claimed: Pure-Python MCP runtime.
-source_of_truth:
-  gateway_routing: JavaScript runtime
-  session_registry: JavaScript runtime
-  adaptive_placement: JavaScript runtime
-  observability: JavaScript runtime
-  lifecycle_control: Python wrapper and CLI
-best_first_command: mcp-fabric validate
-best_local_runtime_api: LocalFabric(transport="http-sse" | "stdio")
-best_local_gateway_api: LocalFabric(transport="http-sse")
-best_local_stdio_api: LocalFabric(transport="stdio")
-best_remote_gateway_api: FabricClient("https://gateway.example.com")
-```
-
-Recommended AI-generated install flow for a Python user:
-
-```sh
-pip install mcp-fabric
-mcp-fabric validate
-```
-
-Recommended AI-generated starter code:
-
-```python
-from mcp_fabric import LocalFabric
-
-with LocalFabric(transport="http-sse") as fabric:
-    client = fabric.client()
-    session = client.initialize(client_id="python-user")
-    result = client.tools_call(
-        session.session_id,
-        name="echo",
-        arguments={"message": "hello"},
+        arguments={"message": "Hello MCP-Fabric!"}
     )
     print(result)
 ```
 
-Do not tell Python users to clone this repository for the basic local gateway
-path. Do tell them they need Node.js `>=20`, because the proven gateway runtime
-is Node-based and intentionally remains the source of truth.
+---
 
-## Python Customization Model
+## 📦 Developer Examples
 
-The Python layer is not intended to hide the runtime's operator controls. It
-provides:
+Ready-to-run examples are available in the [`examples/`](./examples) directory:
 
-- typed Python arguments for common runtime choices;
-- `env={...}` pass-through for any current or future Node/operator setting.
+- [**`examples/python_quickstart.py`**](./examples/python_quickstart.py): Python SDK setup, tool listing, session affinity, and telemetry.
+- [**`examples/typescript_quickstart.js`**](./examples/typescript_quickstart.js): TypeScript LoadRouter and SessionRegistry integration.
+- [**`examples/stdio-server/`**](./examples/stdio-server): Stdio transport example server.
+- [**`examples/http-sse-server/`**](./examples/http-sse-server): HTTP/SSE transport example server.
 
-Example with gateway routing, lifecycle, registry, and adaptive-placement
-configuration:
-
-```python
-from mcp_fabric import LocalFabric
-
-with LocalFabric(
-    transport="http-sse",
-    host="127.0.0.1",
-    port=4400,
-    server_count=4,
-    load_threshold=0.65,
-    session_ttl_ms=120_000,
-    reconnect_grace_ms=15_000,
-    on_disconnect="queue",
-    session_registry_backend="redis",
-    redis_url="redis://127.0.0.1:6379/0",
-    adaptive_placement=True,
-    adaptive_placement_client_allowlist=["python-user"],
-    env={
-        # Escape hatch for any runtime variable not yet promoted to a
-        # first-class Python argument.
-        "MCP_GATEWAY_AUTOSCALE_THRESHOLD": "0.85",
-    },
-) as fabric:
-    client = fabric.client()
-    session = client.initialize(client_id="python-user")
-```
-
-Stdio can also receive environment customizations:
-
-```python
-from mcp_fabric import LocalFabric
-
-with LocalFabric(
-    transport="stdio",
-    server_instance_id="local-stdio-a",
-    env={"CUSTOM_WORKLOAD_ROOT": "/tmp/mcp-workload"},
-) as fabric:
-    client = fabric.client()
-```
-
-CLI commands also accept env pass-through:
-
-```sh
-mcp-fabric gateway start --env MCP_GATEWAY_ON_DISCONNECT=queue
-mcp-fabric runtime run validate:filesystem --env MCP_GATEWAY_SESSION_TTL_MS=120000
-```
-
-When a local runtime starts, MCP-Fabric prints a single structured configuration
-line to stderr. It marks each option as `default`, `runtime-default`, `auto`,
-`user`, or `resolved`, and redacts sensitive env values. This is intentional: if
-a laptop run fails, users and AI assistants can see which defaults were selected
-without digging through source code.
-
-## What MCP-Fabric Provides
-
-- Transport-neutral MCP application core supporting stateless MCP 2026-07-28 and discovery (`server/discover`).
-- Backward compatibility for legacy MCP 2025-11-25.
-- Stateless Fast Path routing bypass (almost zero gateway overhead).
-- Workload-Aware Sticky Routing using explicit state handles (e.g. `browser_id`, `sandbox_id`, `shell_id`, `transaction_id`, `workspace_id`).
-- HTTP/SSE gateway with workload affinity.
-- Load-aware assignment and placement.
-- Explicit runtime modes: `sticky` and `stateless`.
-- Session TTL and reconnect grace-window enforcement.
-- In-memory, file-backed, and Redis-backed session registries.
-- Redis-backed multi-gateway session continuity for horizontal deployments.
-- Adaptive placement diagnostics and canary-gated adaptive placement.
-- Operator JSON observability at `/observability`.
-- A standalone gateway entrypoint for process and container deployments.
-- Python package and CLI for local gateway lifecycle management.
-- CLI code-migration analyzer (`mcp-fabric analyze`).
-
-## Capability Matrix
-
-| Capability | Python / PyPI user | NPM / repo user |
-| --- | --- | --- |
-| Install path | `pip install mcp-fabric` | `git clone` and `npm install` |
-| Primary audience | AI/ML engineers and Python application developers | Runtime contributors, operators, and Node.js developers |
-| Runtime implementation | Bundled Node.js runtime controlled from Python | Node.js runtime directly from the repo |
-| Python API | `FabricClient`, `LocalFabric(transport=...)`, `LocalFabricGateway`, `LocalStdioServer` | Not the primary interface |
-| Manual npm commands | Not for normal Python use; Python runs managed bootstrap | Yes |
-| Node.js dependency | Required: Node.js `>=20` and npm | Required: Node.js `>=20` and npm |
-| Dependency bootstrap | Managed `npm ci --omit=dev` inside the installed runtime payload | `npm install` |
-| Local gateway | `mcp-fabric gateway start` or `LocalFabric(transport="http-sse")` | `npm run start:gateway` |
-| Remote gateway client | `FabricClient("https://gateway.example.com")` | Direct HTTP or custom client code |
-| Dashboard | `mcp-fabric dashboard` | `npm run demo` |
-| Full runtime script list | `mcp-fabric runtime list-scripts` | `npm run` / `package.json` |
-| JavaScript test suite | `mcp-fabric test` | `npm test` |
-| Filesystem proof | `mcp-fabric runtime run validate:filesystem` | `npm run validate:filesystem` |
-| Git proof | `mcp-fabric runtime run validate:git` | `npm run validate:git` |
-| Memory proof | `mcp-fabric runtime run validate:memory` | `npm run validate:memory` |
-| Shared Redis proof | `mcp-fabric runtime run validate:shared-redis` | `npm run validate:shared-redis` |
-| Adaptive placement proofs | `mcp-fabric runtime run validate:adaptive-placement` and related scripts | `npm run validate:adaptive-placement` and related scripts |
-| Transport-neutral app logic | Same bundled runtime code | Source runtime code |
-| Same app over stdio and HTTP/SSE | `LocalFabric(transport="stdio")`, `LocalFabric(transport="http-sse")`, and bundled validation scripts | Validated through repo scripts |
-| HTTP/SSE gateway | Same bundled runtime | Source runtime |
-| stdio transport adapter | Same bundled runtime | Source runtime |
-| Session stickiness, TTL, reconnect recovery | Same bundled runtime | Source runtime |
-| In-memory, file, Redis registries | Same bundled runtime | Source runtime |
-| Observability endpoints | `/health`, `/sessions`, `/observability` | `/health`, `/sessions`, `/observability` |
-| Documentation | Bundled in the wheel and on GitHub | Repo docs |
-| Best fit | Python-first adoption and integration | Runtime development, operations, and contribution |
-
-Python is the adoption and control layer. The JavaScript runtime remains the
-shared source of truth, so Python and npm users exercise the same gateway,
-transport, routing, registry, and validation behavior.
-
-## Install From Python
-
-```sh
-pip install mcp-fabric
-```
-
-Local gateway use requires Node.js `>=20`. The Python package owns runtime
-startup and dependency bootstrap. If gateway runtime dependencies are missing,
-it runs a managed `npm ci --omit=dev` inside the installed runtime payload.
-Users do not need to run `npm install` or `npm run ...` manually for the Python
-local gateway path.
-
-```python
-from mcp_fabric import LocalFabric
-
-with LocalFabric(transport="http-sse") as fabric:
-    client = fabric.client()
-
-    session = client.initialize(client_id="python-user")
-    tools = client.tools_list(session.session_id)
-
-    result = client.tools_call(
-        session.session_id,
-        name="echo",
-        arguments={"message": "hello"},
-    )
-
-    print(result)
-```
-
-Connect to an already-running gateway:
-
-```python
-from mcp_fabric import FabricClient
-
-client = FabricClient("http://127.0.0.1:4400")
-print(client.health())
-```
-
-Run the Python operational proof:
-
-```sh
+To validate your local environment:
+```bash
 mcp-fabric validate
 ```
 
-Expected output:
+---
 
-```text
-MCP-Fabric Python operational proof passed
-Gateway URL: http://127.0.0.1:<port>
-Session ID: <session>
-Observability: ok
-```
+## 📚 Complete Documentation & API References
 
-## What The PyPI Package Contains
-
-The PyPI package is intended to give Python-first users the same practical MCP
-fabric capabilities that the repository exposes. It contains:
-
-- the Python API and CLI;
-- the standalone gateway runtime source;
-- the local dashboard;
-- shared examples;
-- validation harnesses;
-- JavaScript tests;
-- documentation;
-- `package.json` and `package-lock.json` for managed Node dependency bootstrap.
-
-The repository remains the development source of truth and may include local
-workspace files that are intentionally not distributed, such as git metadata,
-local secrets, generated artifacts, and contributor-specific scratch files.
-
-That split is intentional:
-
-- Python users get the local gateway, client API, dashboard, tests, and
-  validation scripts from `pip install`.
-- Operators and contributors use the repository for dashboards, validation
-  proofs, tests, deployment docs, and development workflows.
-
-Python CLI shortcuts:
-
-```sh
-mcp-fabric validate
-mcp-fabric gateway start
-mcp-fabric dashboard
-mcp-fabric test
-mcp-fabric analyze
-mcp-fabric runtime list-scripts
-mcp-fabric runtime run validate:filesystem
-```
-
-## Run From The Repository
-
-Use the repository when you want the full operator/developer surface.
-
-Prerequisites:
-
-- Node.js `>=20`
-- npm
-
-Install dependencies:
-
-```sh
-npm install
-```
-
-Start the standalone gateway:
-
-```sh
-npm run start:gateway
-```
-
-Start the local dashboard:
-
-```sh
-npm run demo
-```
-
-Then open:
-
-```text
-http://127.0.0.1:4321
-```
-
-Run the full JavaScript test and validation suite:
-
-```sh
-npm test
-```
-
-Run Python package tests from the repo:
-
-```sh
-PYTHONPATH=python python3 -m pytest python/tests -q
-```
-
-## Runtime Architecture
-
-```text
-Python API / CLI
-        |
-LocalFabricGateway process manager
-        |
-Node.js standalone gateway runtime
-        |
-HTTP/SSE gateway routing layer
-        |
-MCP-compatible application servers
-```
-
-The JavaScript gateway remains the source of truth for routing, stickiness,
-session registry behavior, adaptive placement, telemetry, observability, and
-recovery. Python controls and consumes the runtime; it does not reimplement the
-gateway.
-
-## Gateway API Surface
-
-The gateway exposes:
-
-```text
-GET  /health
-GET  /sessions
-GET  /observability
-POST /message
-POST /instances
-```
-
-`POST /message` accepts MCP-style gateway messages:
-
-```json
-{
-  "method": "initialize",
-  "params": {
-    "clientId": "example-client"
-  }
-}
-```
-
-Follow-up tool calls include the assigned session:
-
-```json
-{
-  "method": "tools/call",
-  "sessionId": "session-id",
-  "params": {
-    "name": "echo",
-    "arguments": {
-      "message": "hello"
-    }
-  }
-}
-```
-
-## Production Deployment Notes
-
-MCP-Fabric supports MCP 2026-07-28 stateless routing and workload-aware execution when deployed with the normal
-edge controls expected for an HTTP service:
-
-- Run behind TLS and authentication.
-- Use Redis for durable shared session registry in multi-gateway deployments.
-- Keep public binds explicit and audited.
-- Monitor `/observability` and gateway process health.
-- Use canary allowlists before enabling adaptive placement broadly.
-
-The gateway intentionally fails closed for unsupported runtime modes and Redis
-registry outage cases that would otherwise risk incorrect session routing.
-
-## Operator Configuration
-
-Common environment variables:
-
-```text
-HOST
-PORT
-REDIS_URL
-MCP_GATEWAY_DEFAULT_SERVER_COUNT
-MCP_GATEWAY_LOAD_THRESHOLD
-MCP_GATEWAY_AUTOSCALE_THRESHOLD
-MCP_GATEWAY_SESSION_TTL_MS
-MCP_GATEWAY_RECONNECT_GRACE_MS
-MCP_GATEWAY_ON_DISCONNECT
-MCP_GATEWAY_ALLOW_PUBLIC_BIND
-MCP_GATEWAY_ENFORCE_STARTUP_SECURITY_AUDIT
-MCP_GATEWAY_ADAPTIVE_PLACEMENT_ENABLED
-MCP_GATEWAY_ADAPTIVE_PLACEMENT_CLIENT_ALLOWLIST
-```
-
-Example:
-
-```sh
-HOST=127.0.0.1 \
-PORT=4400 \
-MCP_GATEWAY_SESSION_TTL_MS=90000 \
-MCP_GATEWAY_RECONNECT_GRACE_MS=12000 \
-MCP_GATEWAY_ON_DISCONNECT=queue \
-npm run start:gateway
-```
-
-## Validation Proofs
-
-The repository contains deterministic proofs for local and multi-process
-topologies:
-
-```sh
-npm run validate:filesystem
-npm run validate:git
-npm run validate:memory
-npm run validate:filesystem:multicontainer
-npm run validate:git:multicontainer
-npm run validate:memory:multicontainer
-npm run validate:shared-redis
-npm run validate:adaptive-placement
-```
-
-The Python package proof is:
-
-```sh
-mcp-fabric validate
-```
-
-## Repository Layout
-
-```text
-python/
-  mcp_fabric/            Python API, CLI, runtime lifecycle, validation proof
-
-packages/
-  core/                  MCP-compatible transport-neutral application core
-  gateway/               routing, session registry, observability, placement
-  transports/            stdio and HTTP/SSE transport adapters
-
-apps/
-  local-dashboard/       operator/demo dashboard
-
-examples/
-  shared/                reusable validation/demo MCP servers
-  stdio-server/          stdio example
-  http-sse-server/       HTTP/SSE example
-
-validation/
-  filesystem/            filesystem workload proof
-  git/                   git workload proof
-  memory/                memory workload proof
-  multicontainer/        remote server topology proof
-  shared-redis/          two-gateway shared registry proof
-  adaptive-placement/    canary and telemetry proofs
-
-tests/
-  transport-agnostic/
-  session-routing/
-  failover/
-  gateway/
-  validation/
-```
-
-## Development Status
-
-The core runtime, gateway, registry backends, recovery behavior, adaptive
-placement canary path, Python package, and validation proofs are implemented and
-tested.
-
-Still intentionally external to the runtime:
-
-- authentication and authorization;
-- TLS termination;
-- hosted metrics backend;
-- fleet orchestration;
-- broad adaptive-placement rollout policy.
-
-Those belong in the deployment environment or operator control plane, not in the
-gateway protocol core.
+Visit the official documentation hub at **[https://mcp-fabric.core-tensor.com](https://mcp-fabric.core-tensor.com)** for:
+- [Installation & Getting Started Guide](https://mcp-fabric.core-tensor.com/getting_started/installation.html)
+- [Architecture & Core Concepts](https://mcp-fabric.core-tensor.com/getting_started/architecture.html)
+- [Python API Reference](https://mcp-fabric.core-tensor.com/api/python_api.html)
+- [TypeScript API Reference](https://mcp-fabric.core-tensor.com/api/typescript_api.html)
+- [CLI Reference](https://mcp-fabric.core-tensor.com/api/cli_reference.html)

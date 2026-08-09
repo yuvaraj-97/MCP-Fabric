@@ -1,5 +1,5 @@
 MCP Fabric Documentation
-======================
+========================
 
 .. image:: https://img.shields.io/badge/MCP-Fabric-orange.svg
    :alt: MCP Fabric Logo
@@ -39,14 +39,6 @@ MCP Fabric Documentation
    api/python_api
    api/typescript_api
    api/cli_reference
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Project & RFCs
-
-   rfcs/phase_4_self_optimization
-   rfcs/agentic_scale_up
-   rfcs/test_strategy
 
 Indices and Tables
 ==================
