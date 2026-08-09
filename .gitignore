@@ -7,3 +7,6 @@ build/
 __pycache__/
 validation-artifacts/
 examples/multi-container-proof/
+docs/_build/
+docs_venv/
+
